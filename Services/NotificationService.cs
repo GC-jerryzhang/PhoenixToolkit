@@ -13,23 +13,31 @@ public static class NotificationService
         var installUri = ProtocolActivationService.BuildInstallUri(installPlan.Id);
         var lines = new List<string>();
         if (installPlan.DesignerPackage is not null)
-            lines.Add($"Designer: {installPlan.DesignerPackage.FileName}");
+            lines.Add($"设计器：{installPlan.DesignerPackage.FileName}");
         if (installPlan.ServerPackage is not null)
-            lines.Add($"Server: {installPlan.ServerPackage.FileName}");
+            lines.Add($"服务端：{installPlan.ServerPackage.FileName}");
 
         var actionText = installPlan.DesignerPackage is not null && installPlan.ServerPackage is not null
-            ? "点击通知先安装 Designer，再安装 Server"
+            ? "点击通知先安装设计器，再安装服务端"
             : "点击通知开始安装";
 
         new ToastContentBuilder()
             .SetProtocolActivation(installUri)
-            .AddText("Phoenix 新安装包已拉取")
+            .AddText(BuildFetchTitle(installPlan))
             .AddText(string.Join(Environment.NewLine, lines))
             .AddText(actionText)
             .Show(toast =>
             {
                 toast.ExpirationTime = DateTimeOffset.Now.AddMinutes(5);
             });
+    }
+
+    internal static string BuildFetchTitle(InstallPlan plan)
+    {
+        var package = plan.DesignerPackage ?? plan.ServerPackage!;
+        var channel = package.Channel == PackageChannel.Release
+            ? $"release {package.ReleaseVersion}" : "develop";
+        return $"Phoenix {channel} 新安装包已拉取";
     }
 
     public static void ShowInstallFailure(string message)

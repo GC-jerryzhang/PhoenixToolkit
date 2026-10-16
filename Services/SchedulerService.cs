@@ -119,7 +119,7 @@ public static class SchedulerService
             <?xml version="1.0" encoding="UTF-16"?>
             <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
               <RegistrationInfo>
-                <Description>Fetch latest Phoenix Designer and Server installers (every {intervalMinutes} min)</Description>
+                <Description>每 {intervalMinutes} 分钟自动拉取 Phoenix 设计器和服务端安装包</Description>
               </RegistrationInfo>
               <Triggers>
                 <CalendarTrigger>
@@ -170,7 +170,7 @@ public static class SchedulerService
             <?xml version="1.0" encoding="UTF-16"?>
             <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
               <RegistrationInfo>
-                <Description>Cleanup old Phoenix installers (Mon-Fri at {cleanupTime})</Description>
+                <Description>每周一至周五 {cleanupTime} 清理 Phoenix 历史安装包</Description>
               </RegistrationInfo>
               <Triggers>
                 <CalendarTrigger>

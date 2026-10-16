@@ -119,13 +119,13 @@ public static class InstallActivationService
         }
     }
 
-    private static void ValidatePlan(AppConfig config, InstallPlan plan)
+    internal static void ValidatePlan(AppConfig config, InstallPlan plan)
     {
-        ValidatePackage(plan.DesignerPackage, config.DesignerDir);
-        ValidatePackage(plan.ServerPackage, config.ServerDir);
+        ValidatePackage(config, plan.DesignerPackage);
+        ValidatePackage(config, plan.ServerPackage);
     }
 
-    private static void ValidatePackage(FetchedPackageInfo? package, string expectedRoot)
+    private static void ValidatePackage(AppConfig config, FetchedPackageInfo? package)
     {
         if (package is null)
             return;
@@ -133,12 +133,32 @@ public static class InstallActivationService
         if (!File.Exists(package.FullPath))
             throw new FileNotFoundException($"安装包不存在: {package.FileName}", package.FullPath);
 
+        var expectedRoot = GetPackageRoot(config, package);
         var fullPath = Path.GetFullPath(package.FullPath);
         var fullRoot = Path.GetFullPath(expectedRoot);
         var relativePath = Path.GetRelativePath(fullRoot, fullPath);
 
         if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
             throw new InvalidOperationException($"安装包路径不合法: {package.FileName}");
+    }
+
+    private static string GetPackageRoot(AppConfig config, FetchedPackageInfo package)
+    {
+        var productDirectory = package.Kind == PackageKind.Designer ? "designer" : "server";
+
+        if (package.Channel == PackageChannel.Develop)
+            return Path.Combine(config.DevelopDir, productDirectory);
+
+        if (string.IsNullOrWhiteSpace(package.ReleaseVersion) ||
+            Path.IsPathRooted(package.ReleaseVersion) ||
+            package.ReleaseVersion is "." or ".." ||
+            package.ReleaseVersion.Contains('/') ||
+            package.ReleaseVersion.Contains('\\'))
+        {
+            throw new InvalidOperationException($"安装包路径不合法: {package.FileName}");
+        }
+
+        return Path.Combine(config.ReleaseDir, package.ReleaseVersion, productDirectory);
     }
 
     private static string BuildStartMessage(InstallPlan plan)

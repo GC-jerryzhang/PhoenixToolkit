@@ -5,7 +5,7 @@ using PhoenixToolkit.Services;
 
 namespace PhoenixToolkit.Tests;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -24,6 +24,23 @@ internal static class Program
             FetchServiceDoesNotFallBackWhenWindowsPlatformSubdirectoryIsEmpty,
             FetchServiceDoesNotFallBackWhenWindowsPlatformLayoutIsIncomplete,
             FetchServiceDoesNotFallBackWhenOnlyLinuxPlatformDirectoriesArePresent,
+            ReleaseSourceUsesNumericVersionsAndIgnoresReleaseDashDirectory,
+            ChannelSelectionLimitsSources,
+            FetchCopiesBothChannelsAndSkipsExistingPackages,
+            FetchAcceptsCurrentChineseSourceNamesAndWritesChineseCacheNames,
+            FetchFailureDoesNotBlockOtherPackagesOrChannels,
+            FetchRejectsConcurrentCycleAndWritesLog,
+            FailedCopyDoesNotLeaveInstallerOrPartialFile,
+            ServerWithoutBuildNumberUsesTimestamp,
+            LegacyConfigMigratesSourceAndDefaultsToBothChannels,
+            ChannelSelectionRoundTripsAndDisplaysInMainForm,
+            InstallPlanRejectsMixedChannelsAndVersions,
+            InstallPlanValidationUsesChannelSpecificCacheRoots,
+            InstallPlanCanRetryAfterPackagePathValidationFailure,
+            CleanupKeepsLatestReleasePackagesForEachVersion,
+            LegacyCachesMoveUnderDevelopAndOldInstallPlansStillResolve,
+            CacheMigrationPreservesConflictsAndUnrelatedFiles,
+            UnstableReleasePackageDoesNotBlockOtherPackages,
             PhoenixServerMigrationStopsServiceBacksUpAndRestoresRenamedData,
             PhoenixServerMigrationSkipsMissingLegacyDataWithoutStoppingService,
             ServerInstallBacksUpBeforeLaunchingAndRestoresAfterward,

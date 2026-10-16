@@ -6,6 +6,7 @@ namespace PhoenixToolkit.Services;
 public static class InstallPlanService
 {
     private const int RetentionDays = 7;
+    private const string InvalidPackagePathErrorPrefix = "安装包路径不合法:";
 
     public static InstallPlan? CreatePlan(
         AppConfig config,
@@ -14,6 +15,11 @@ public static class InstallPlanService
     {
         if (designerPackage is null && serverPackage is null)
             return null;
+
+        if (designerPackage is not null && serverPackage is not null &&
+            (designerPackage.Channel != serverPackage.Channel ||
+             designerPackage.ReleaseVersion != serverPackage.ReleaseVersion))
+            throw new ArgumentException("同一安装任务只能包含同一渠道、同一发行版本的安装包。");
 
         CleanupExpiredPlans(config);
         Directory.CreateDirectory(config.InstallPlanDir);
@@ -98,11 +104,15 @@ public static class InstallPlanService
                 if (existing.Status == InstallPlanStatus.Running)
                     throw new InvalidOperationException("该安装任务正在执行，请勿重复点击通知。");
 
-                if (existing.Status is InstallPlanStatus.Completed or InstallPlanStatus.Failed)
+                if (existing.Status == InstallPlanStatus.Completed ||
+                    (existing.Status == InstallPlanStatus.Failed &&
+                     existing.LastError?.StartsWith(InvalidPackagePathErrorPrefix, StringComparison.Ordinal) != true))
                     throw new InvalidOperationException("该安装任务已处理完成，不能重复执行。");
 
                 return existing with
                 {
+                    DesignerPackage = PackageCacheMigrationService.ResolveMovedPackage(config, existing.DesignerPackage),
+                    ServerPackage = PackageCacheMigrationService.ResolveMovedPackage(config, existing.ServerPackage),
                     Status = InstallPlanStatus.Running,
                     StartedAt = DateTimeOffset.Now,
                     CompletedAt = null,

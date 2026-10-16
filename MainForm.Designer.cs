@@ -21,7 +21,7 @@ partial class MainForm
         this.pathsCard = CreateCardPanel();
         this.pathsCardLayout = CreateCardLayout();
         this.lblPathsTitle = CreateSectionTitle("基础配置");
-        this.lblPathsDesc = CreateSectionDescription("设置共享安装包目录与本地缓存目录");
+        this.lblPathsDesc = CreateSectionDescription("选择 Installers 根目录（包含 develop 和 release），安装包按渠道保存");
         this.pathsFieldsLayout = new TableLayoutPanel();
         this.lblSourceDir = CreateFieldLabel("共享源目录");
         this.txtSourceDir = new TextBox();
@@ -33,15 +33,19 @@ partial class MainForm
         this.fetchCard = CreateCardPanel();
         this.fetchCardLayout = CreateCardLayout();
         this.lblFetchTitle = CreateSectionTitle("拉取策略");
-        this.lblFetchDesc = CreateSectionDescription("按固定频率检查并拉取最新安装包");
+        this.lblFetchDesc = CreateSectionDescription("拉取 Windows 包，release 自动选择最新版本");
         this.fetchInlinePanel = new FlowLayoutPanel();
+        this.fetchOptionsLayout = new TableLayoutPanel();
+        this.fetchChannelsPanel = new FlowLayoutPanel();
+        this.chkFetchDevelop = new CheckBox();
+        this.chkFetchRelease = new CheckBox();
         this.lblInterval = CreateFieldLabel("拉取间隔");
         this.numFetchInterval = new NumericUpDown();
         this.lblIntervalUnit = CreateInlineLabel("分钟");
         this.cleanupCard = CreateCardPanel();
         this.cleanupCardLayout = CreateCardLayout();
         this.lblCleanupTitle = CreateSectionTitle("清理策略");
-        this.lblCleanupDesc = CreateSectionDescription("控制历史版本保留周期和清理时间");
+        this.lblCleanupDesc = CreateSectionDescription("按渠道清理；release 每个版本始终保留最新包");
         this.cleanupFieldsLayout = new TableLayoutPanel();
         this.lblKeepAll = CreateFieldLabel("保留全部");
         this.numKeepAll = new NumericUpDown();
@@ -234,8 +238,30 @@ partial class MainForm
         //
         this.fetchCardLayout.Controls.Add(this.lblFetchTitle, 0, 0);
         this.fetchCardLayout.Controls.Add(this.lblFetchDesc, 0, 1);
-        this.fetchCardLayout.Controls.Add(this.fetchInlinePanel, 0, 2);
+        this.fetchCardLayout.Controls.Add(this.fetchOptionsLayout, 0, 2);
         this.fetchCardLayout.Dock = DockStyle.Fill;
+        this.fetchOptionsLayout.ColumnCount = 1;
+        this.fetchOptionsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        this.fetchOptionsLayout.RowCount = 2;
+        this.fetchOptionsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        this.fetchOptionsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        this.fetchOptionsLayout.Dock = DockStyle.Fill;
+        this.fetchOptionsLayout.Margin = new Padding(0, 10, 0, 0);
+        this.fetchOptionsLayout.Controls.Add(this.fetchChannelsPanel, 0, 0);
+        this.fetchOptionsLayout.Controls.Add(this.fetchInlinePanel, 0, 1);
+        this.fetchChannelsPanel.Dock = DockStyle.Fill;
+        this.fetchChannelsPanel.Margin = new Padding(0);
+        this.fetchChannelsPanel.WrapContents = false;
+        this.fetchChannelsPanel.Controls.Add(this.chkFetchDevelop);
+        this.fetchChannelsPanel.Controls.Add(this.chkFetchRelease);
+        this.chkFetchDevelop.Name = "chkFetchDevelop";
+        this.chkFetchDevelop.Text = "develop";
+        this.chkFetchDevelop.AutoSize = true;
+        this.chkFetchDevelop.Margin = new Padding(0, 2, 18, 0);
+        this.chkFetchRelease.Name = "chkFetchRelease";
+        this.chkFetchRelease.Text = "release";
+        this.chkFetchRelease.AutoSize = true;
+        this.chkFetchRelease.Margin = new Padding(0, 2, 0, 0);
         //
         // fetchInlinePanel
         //
@@ -246,7 +272,7 @@ partial class MainForm
         this.fetchInlinePanel.Dock = DockStyle.Fill;
         this.fetchInlinePanel.FlowDirection = FlowDirection.LeftToRight;
         this.fetchInlinePanel.Location = new Point(0, 44);
-        this.fetchInlinePanel.Margin = new Padding(0, 10, 0, 0);
+        this.fetchInlinePanel.Margin = new Padding(0);
         this.fetchInlinePanel.WrapContents = false;
         //
         // numFetchInterval
@@ -663,6 +689,10 @@ partial class MainForm
     private Label lblFetchTitle;
     private Label lblFetchDesc;
     private FlowLayoutPanel fetchInlinePanel;
+    private TableLayoutPanel fetchOptionsLayout;
+    private FlowLayoutPanel fetchChannelsPanel;
+    private CheckBox chkFetchDevelop;
+    private CheckBox chkFetchRelease;
     private Label lblInterval;
     private NumericUpDown numFetchInterval;
     private Label lblIntervalUnit;

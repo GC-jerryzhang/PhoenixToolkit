@@ -28,6 +28,8 @@ public partial class MainForm : Form
         txtSourceDir.Text = config.SourceDir;
         txtLocalBaseDir.Text = config.LocalBaseDir;
         numFetchInterval.Value = config.FetchIntervalMinutes;
+        chkFetchDevelop.Checked = config.FetchDevelop;
+        chkFetchRelease.Checked = config.FetchRelease;
         numKeepAll.Value = config.CleanupWeeks.KeepAllWeeks;
         numKeepDaily.Value = config.CleanupWeeks.KeepDailyWeeks;
         numDeleteAfter.Value = config.CleanupWeeks.DeleteAfterWeeks;
@@ -38,7 +40,7 @@ public partial class MainForm : Form
 
     private AppConfig BuildConfigFromUI()
     {
-        return new AppConfig(
+        return ConfigService.NormalizeSourceDirectory(new AppConfig(
             SourceDir: txtSourceDir.Text.Trim(),
             LocalBaseDir: txtLocalBaseDir.Text.Trim(),
             FetchIntervalMinutes: (int)numFetchInterval.Value,
@@ -48,8 +50,10 @@ public partial class MainForm : Form
                 KeepDailyWeeks: (int)numKeepDaily.Value,
                 DeleteAfterWeeks: (int)numDeleteAfter.Value
             ),
-            CloseBehaviorPreference: closeBehaviorPreference
-        );
+            CloseBehaviorPreference: closeBehaviorPreference,
+            FetchDevelop: chkFetchDevelop.Checked,
+            FetchRelease: chkFetchRelease.Checked
+        ));
     }
 
     private void SaveConfig()

@@ -23,6 +23,22 @@ public static class CleanupService
 
             TieredCleanup(config.DesignerDir, "Designer", config.CleanupWeeks, Log);
             TieredCleanup(config.ServerDir, "Server", config.CleanupWeeks, Log);
+            foreach (var kind in new[] { PackageKind.Designer, PackageKind.Server })
+            {
+                var legacyDirectory = PackageCacheMigrationService.GetLegacyDirectory(config, kind);
+                if (Directory.Exists(legacyDirectory))
+                    TieredCleanup(legacyDirectory, $"Legacy develop/{kind}", config.CleanupWeeks, Log);
+            }
+            if (Directory.Exists(config.ReleaseDir))
+            {
+                foreach (var versionDir in Directory.EnumerateDirectories(config.ReleaseDir))
+                {
+                    foreach (var kind in new[] { "designer", "server" })
+                        TieredCleanup(Path.Combine(versionDir, kind),
+                            $"release/{Path.GetFileName(versionDir)}/{kind}", config.CleanupWeeks, Log,
+                            keepLatest: true);
+                }
+            }
             InstallPlanService.CleanupExpiredPlans(config, Log);
             CleanupLogs(config.LogDir, 30, Log);
 
@@ -39,7 +55,7 @@ public static class CleanupService
     }
 
     private static void TieredCleanup(
-        string folder, string label, CleanupWeeks weeks, Action<string, string> log)
+        string folder, string label, CleanupWeeks weeks, Action<string, string> log, bool keepLatest = false)
     {
         if (!Directory.Exists(folder))
         {
@@ -65,6 +81,11 @@ public static class CleanupService
         var cutoffDelete = now.AddDays(-weeks.DeleteAfterWeeks * 7);
 
         int deleted = 0, kept = 0;
+        var latest = keepLatest ? allFiles
+            .Where(file => !Regex.IsMatch(file.Name, @"Setu\.exe$|Setup \.exe$"))
+            .OrderByDescending(file => file.LastWriteTime)
+            .ThenByDescending(file => GetSortKey(file.Name))
+            .FirstOrDefault() : null;
 
         foreach (var file in allFiles)
         {
@@ -79,7 +100,7 @@ public static class CleanupService
 
             bool keep;
 
-            if (file.LastWriteTime > cutoffKeepAll)
+            if (file == latest || file.LastWriteTime > cutoffKeepAll)
             {
                 // Within keepAllWeeks: keep all
                 keep = true;

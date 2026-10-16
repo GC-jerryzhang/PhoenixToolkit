@@ -37,17 +37,38 @@ public static class ConfigService
         }
 
         var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize(json, AppConfigJsonContext.Default.AppConfig) ?? CreateDefaultConfig();
+        var config = JsonSerializer.Deserialize(json, AppConfigJsonContext.Default.AppConfig) ?? CreateDefaultConfig();
+        var migrated = NormalizeSourceDirectory(config);
+        if (migrated != config)
+            Save(migrated);
+        return migrated;
     }
 
     public static void Save(AppConfig config)
     {
+        config = NormalizeSourceDirectory(config);
         var configDirectory = Path.GetDirectoryName(ConfigPath);
         if (!string.IsNullOrWhiteSpace(configDirectory))
             Directory.CreateDirectory(configDirectory);
 
         var json = JsonSerializer.Serialize(config, AppConfigJsonContext.Default.AppConfig);
         File.WriteAllText(ConfigPath, json);
+    }
+
+    internal static AppConfig NormalizeSourceDirectory(AppConfig config)
+    {
+        var source = Path.TrimEndingDirectorySeparator(config.SourceDir.Trim());
+        if (source.Equals(@"\\xafile\ToolsFile1\Projects\Phoenix\Installers\develop", StringComparison.OrdinalIgnoreCase) ||
+            source.Equals(@"\\xafile\ToolsFile1\Projects\Phoenix\Installers", StringComparison.OrdinalIgnoreCase))
+        {
+            source = new AppConfig().SourceDir;
+        }
+        else if (Path.GetFileName(source).Equals("develop", StringComparison.OrdinalIgnoreCase))
+        {
+            source = Path.GetDirectoryName(source) ?? source;
+        }
+
+        return config with { SourceDir = source };
     }
 
     private static AppConfig CreateDefaultConfig()
