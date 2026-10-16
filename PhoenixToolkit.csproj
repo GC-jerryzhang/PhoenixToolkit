@@ -9,10 +9,10 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <AssemblyName>PhoenixToolkit</AssemblyName>
     <RootNamespace>PhoenixToolkit</RootNamespace>
-    <Version>2.1.0</Version>
-    <AssemblyVersion>2.1.0.0</AssemblyVersion>
-    <FileVersion>2.1.0.0</FileVersion>
-    <InformationalVersion>2.1.0</InformationalVersion>
+    <Version>2.1.1</Version>
+    <AssemblyVersion>2.1.1.0</AssemblyVersion>
+    <FileVersion>2.1.1.0</FileVersion>
+    <InformationalVersion>2.1.1</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <Compile Remove="tests\**\*.cs" />
+    <EmbeddedResource Include="Assets\Notifications\*.png" />
   </ItemGroup>
 
 </Project>

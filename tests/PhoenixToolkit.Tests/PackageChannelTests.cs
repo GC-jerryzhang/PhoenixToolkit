@@ -78,7 +78,7 @@ internal static partial class Program
                     "Renaming the local Designer cache must not alter its package bytes.");
                 Assert.True(File.ReadAllBytes(server.FullPath).SequenceEqual(File.ReadAllBytes(sourceServer)),
                     "Renaming the local Server cache must not alter its package bytes.");
-                Assert.Contains(NotificationService.BuildFetchTitle(plan), designer.Channel == PackageChannel.Release ? "release v1.0.0" : "develop",
+                Assert.Contains(NotificationService.BuildFetchTitle(plan), designer.Channel == PackageChannel.Release ? "RELEASE · 发布版 · v1.0.0" : "DEVELOP · 开发版",
                     "Notification should identify channel and release version.");
                 Assert.True(InstallPlanService.TryStartPlan(config, plan.Id, out var persisted, out var error), error);
                 Assert.Equal(designer.Channel, persisted!.DesignerPackage!.Channel, "Channel must survive JSON serialization.");
