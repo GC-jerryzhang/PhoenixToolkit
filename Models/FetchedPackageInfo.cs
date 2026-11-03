@@ -6,5 +6,6 @@ public sealed record FetchedPackageInfo(
     string FullPath,
     DateTimeOffset FetchedAt,
     PackageChannel Channel = PackageChannel.Develop,
-    string? ReleaseVersion = null
+    string? ReleaseVersion = null,
+    string? ArchiveVersion = null
 );

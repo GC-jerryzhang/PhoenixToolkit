@@ -42,6 +42,8 @@ internal static class PackageCacheMigrationService
                 log($"Legacy cache migration skipped: {legacyDirectory} ({ex.Message})", "WARNING");
             }
         }
+
+        ReleasePackageCacheMigrationService.Migrate(config, log);
     }
 
     public static string GetLegacyDirectory(AppConfig config, PackageKind kind) =>
@@ -49,7 +51,16 @@ internal static class PackageCacheMigrationService
 
     public static FetchedPackageInfo? ResolveMovedPackage(AppConfig config, FetchedPackageInfo? package)
     {
-        if (package is null || package.Channel != PackageChannel.Develop || File.Exists(package.FullPath))
+        if (package is null)
+            return package;
+
+        if (package.Channel == PackageChannel.Release)
+            return ReleasePackageCacheMigrationService.ResolveMovedPackage(config, package);
+
+        if (package.Channel != PackageChannel.Develop)
+            return package;
+
+        if (File.Exists(package.FullPath))
             return package;
 
         var legacyPath = Path.Combine(GetLegacyDirectory(config, package.Kind), Path.GetFileName(package.FileName));

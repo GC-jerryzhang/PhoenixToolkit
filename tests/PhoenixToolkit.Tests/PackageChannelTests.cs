@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using PhoenixToolkit.Models;
 using PhoenixToolkit.Services;
 
@@ -23,6 +24,76 @@ internal static partial class Program
             Assert.Equal("v1.10.0", sources[1].ReleaseVersion!, "Version ordering must be numeric.");
             Assert.Equal(Path.Combine(source, "release", "v1.10.0"), sources[1].Directory,
                 "Only the release directory should supply release packages.");
+        });
+    }
+
+    private static void ReleaseArchiveVersionsUseCanonicalProductVersions()
+    {
+        Assert.True(ReleasePackageVersionService.NormalizeArchiveVersion("1.0.1") == "v1.0.1",
+            "Three-part package versions should use the canonical v-prefixed directory name.");
+        Assert.True(ReleasePackageVersionService.NormalizeArchiveVersion("1.0.1.0") == "v1.0.1",
+            "Four-part file versions should omit the revision component from the archive directory.");
+        Assert.True(ReleasePackageVersionService.NormalizeArchiveVersion("v1.0.2") == "v1.0.2",
+            "Future product versions should be normalized without hard-coded cases.");
+        Assert.Null(ReleasePackageVersionService.NormalizeArchiveVersion("1.0"),
+            "Package metadata without a patch component should fall back to the source release version.");
+        Assert.Null(ReleasePackageVersionService.NormalizeArchiveVersion("1.0.1-beta"),
+            "Non-numeric package versions should be rejected for archive directory names.");
+    }
+
+    private static void ReleasePackagesArchiveByProductVersion()
+    {
+        foreach (var productVersion in new[] { "1.0.1", "1.0.2" })
+        {
+            RunIsolated(config =>
+            {
+                config = config with { SourceDir = CreateChannelFixture(config), FetchDevelop = false };
+                var plans = new List<InstallPlan>();
+                var output = FetchService.Execute(
+                    config,
+                    _ => true,
+                    FileVersionInfo.GetVersionInfo,
+                    plan => { if (plan is not null) plans.Add(plan); },
+                    _ => productVersion);
+
+                Assert.False(output.Contains("[ERROR]"), output);
+                var plan = plans.Single();
+                var designer = plan.DesignerPackage!;
+                var server = plan.ServerPackage!;
+                var archiveVersion = $"v{productVersion}";
+                Assert.Equal("v1.0.0", designer.ReleaseVersion!, "The source release version must remain attached to the package.");
+                Assert.Equal(archiveVersion, designer.ArchiveVersion!, "The product version must be stored separately for cache routing.");
+                Assert.Equal(archiveVersion, server.ArchiveVersion!, "Designer and Server must each use their package version for routing.");
+                Assert.Equal(Path.Combine(config.ReleaseDir, archiveVersion, "designer"), Path.GetDirectoryName(designer.FullPath)!,
+                    "Release Designer must be cached under its product version.");
+                Assert.Equal(Path.Combine(config.ReleaseDir, archiveVersion, "server"), Path.GetDirectoryName(server.FullPath)!,
+                    "Release Server must be cached under its product version.");
+                Assert.Contains(NotificationService.BuildFetchTitle(plan), "v1.0.0",
+                    "Release notifications must continue to show the source release version.");
+                Assert.True(File.Exists(Path.Combine(config.SourceDir, "release", "v1.0.0", "Designer-Windows", "Phoenix-Windows-202610141445.exe")),
+                    "Archiving must leave shared source packages untouched.");
+                InstallActivationService.ValidatePlan(config, plan);
+            });
+        }
+    }
+
+    private static void ReleaseArchiveVersionFallsBackToSourceVersion()
+    {
+        RunIsolated(config =>
+        {
+            config = config with { SourceDir = CreateChannelFixture(config), FetchDevelop = false };
+            var plans = new List<InstallPlan>();
+            var output = FetchService.Execute(
+                config,
+                _ => true,
+                FileVersionInfo.GetVersionInfo,
+                plan => { if (plan is not null) plans.Add(plan); },
+                _ => "unavailable-version");
+
+            Assert.Contains(output, "package version metadata unavailable; using source release version v1.0.0",
+                "Invalid package metadata must be logged before falling back to the source version.");
+            Assert.Equal("v1.0.0", plans.Single().DesignerPackage!.ArchiveVersion!,
+                "Invalid package metadata should use the normalized source version for its cache directory.");
         });
     }
 
@@ -83,6 +154,8 @@ internal static partial class Program
                 Assert.True(InstallPlanService.TryStartPlan(config, plan.Id, out var persisted, out var error), error);
                 Assert.Equal(designer.Channel, persisted!.DesignerPackage!.Channel, "Channel must survive JSON serialization.");
                 Assert.Equal(designer.ReleaseVersion ?? "", persisted.DesignerPackage.ReleaseVersion ?? "", "Release version must persist.");
+                Assert.Equal(designer.ArchiveVersion ?? "", persisted.DesignerPackage.ArchiveVersion ?? "",
+                    "Archive version must survive install plan JSON serialization.");
             }
             var repeat = FetchService.Execute(config, Stable, FileVersionInfo.GetVersionInfo, Notify);
             Assert.False(repeat.Contains("[ERROR]"), repeat);
@@ -265,6 +338,22 @@ internal static partial class Program
 
             InstallActivationService.ValidatePlan(config, releasePlan);
 
+            var productVersionDirectory = Path.Combine(config.ReleaseDir, "v1.0.1", "designer");
+            var productVersionPath = Path.Combine(productVersionDirectory, "designer-1.0.1.exe");
+            Directory.CreateDirectory(productVersionDirectory);
+            File.WriteAllText(productVersionPath, "release designer");
+            InstallActivationService.ValidatePlan(config, new InstallPlan(
+                "3d9f6c38a6b44023ba24d288b4ec96d7",
+                new FetchedPackageInfo(
+                    PackageKind.Designer,
+                    Path.GetFileName(productVersionPath),
+                    productVersionPath,
+                    DateTimeOffset.Now,
+                    PackageChannel.Release,
+                    "v1.0.0",
+                    "v1.0.1"),
+                null));
+
             var developDesignerDirectory = config.DesignerDir;
             var developDesignerPath = Path.Combine(developDesignerDirectory, "12Phoenix-Windows-1.0.0-Setup.exe");
             Directory.CreateDirectory(developDesignerDirectory);
@@ -355,6 +444,79 @@ internal static partial class Program
             Assert.Equal(4, Directory.GetFiles(config.ReleaseDir, "*.exe", SearchOption.AllDirectories).Length,
                 "Latest package for every release version and product must survive age cleanup.");
             Assert.False(Directory.EnumerateFiles(config.ReleaseDir, "11*", SearchOption.AllDirectories).Any(), "Old superseded releases should expire.");
+        });
+    }
+
+    private static void ReleaseCacheMigrationPreservesConflictsAndResolvesLegacyPlans()
+    {
+        RunIsolated(config =>
+        {
+            var oldServerDirectory = Path.Combine(config.ReleaseDir, "v1.0.0", "server");
+            var oldServerPath = Path.Combine(oldServerDirectory, "legacy-server.exe");
+            Directory.CreateDirectory(oldServerDirectory);
+            File.WriteAllText(oldServerPath, "server payload");
+
+            var conflictSourceDirectory = Path.Combine(config.ReleaseDir, "v1.0.0", "designer");
+            var conflictSourcePath = Path.Combine(conflictSourceDirectory, "designer-conflict.exe");
+            var conflictTargetDirectory = Path.Combine(config.ReleaseDir, "v1.0.1", "designer");
+            var conflictTargetPath = Path.Combine(conflictTargetDirectory, Path.GetFileName(conflictSourcePath));
+            Directory.CreateDirectory(conflictSourceDirectory);
+            Directory.CreateDirectory(conflictTargetDirectory);
+            File.WriteAllText(conflictSourcePath, "older payload");
+            File.WriteAllText(conflictTargetPath, "existing payload");
+
+            var invalidVersionPath = Path.Combine(conflictSourceDirectory, "invalid-version.exe");
+            File.WriteAllText(invalidVersionPath, "unknown version payload");
+
+            var legacyServerPackage = new FetchedPackageInfo(
+                PackageKind.Server,
+                Path.GetFileName(oldServerPath),
+                oldServerPath,
+                DateTimeOffset.Now,
+                PackageChannel.Release,
+                "v1.0.0");
+            var plan = InstallPlanService.CreatePlan(config, null, legacyServerPackage)!;
+            var planPath = Path.Combine(config.InstallPlanDir, $"{plan.Id}.json");
+            var planJson = JsonNode.Parse(File.ReadAllText(planPath))!.AsObject();
+            planJson["serverPackage"]!.AsObject().Remove("archiveVersion");
+            File.WriteAllText(planPath, planJson.ToJsonString());
+
+            var logs = new List<string>();
+            string? ResolveVersion(string path) => Path.GetFileName(path) switch
+            {
+                "legacy-server.exe" or "designer-conflict.exe" => "1.0.1",
+                "invalid-version.exe" => null,
+                _ => "1.0.0"
+            };
+
+            ReleasePackageCacheMigrationService.Migrate(config, ResolveVersion, (message, _) => logs.Add(message));
+            ReleasePackageCacheMigrationService.Migrate(config, ResolveVersion, (message, _) => logs.Add(message));
+
+            var migratedServerPath = Path.Combine(config.ReleaseDir, "v1.0.1", "server", Path.GetFileName(oldServerPath));
+            Assert.False(File.Exists(oldServerPath), "A package with a known product version should move from its old release directory.");
+            Assert.Equal("server payload", File.ReadAllText(migratedServerPath), "Migration must preserve package contents.");
+            Assert.True(File.Exists(conflictSourcePath), "A conflicting source package must be retained.");
+            Assert.Equal("existing payload", File.ReadAllText(conflictTargetPath), "Migration must never overwrite an existing package.");
+            Assert.True(File.Exists(invalidVersionPath), "Packages without valid metadata must remain in place.");
+            Assert.True(logs.Any(line => line.Contains("destination already exists")), "Conflicts should be logged.");
+            Assert.True(logs.Any(line => line.Contains("package version unavailable")), "Packages without usable metadata should be logged.");
+            Assert.Equal(1, logs.Count(line => line.Contains("Moved release package")), "Repeated migration must not move a package twice.");
+
+            Assert.True(InstallPlanService.TryStartPlan(config, plan.Id, out var resolvedPlan, out var error), error);
+            Assert.Equal(migratedServerPath, resolvedPlan!.ServerPackage!.FullPath,
+                "An old notification should resolve a package moved to its product version directory.");
+            Assert.Equal("v1.0.1", resolvedPlan.ServerPackage.ArchiveVersion!,
+                "Resolving an old notification should fill its missing archive version.");
+            InstallActivationService.ValidatePlan(config, resolvedPlan);
+
+            var duplicatePath = Path.Combine(config.ReleaseDir, "v1.0.2", "server", Path.GetFileName(oldServerPath));
+            Directory.CreateDirectory(Path.GetDirectoryName(duplicatePath)!);
+            File.WriteAllText(duplicatePath, "duplicate package");
+            var ambiguousPackage = PackageCacheMigrationService.ResolveMovedPackage(config, legacyServerPackage)!;
+            Assert.Equal(oldServerPath, ambiguousPackage.FullPath,
+                "Legacy notification recovery must not guess when multiple matching packages exist.");
+            Assert.Null(ambiguousPackage.ArchiveVersion,
+                "Ambiguous recovery must not assign an archive version.");
         });
     }
 

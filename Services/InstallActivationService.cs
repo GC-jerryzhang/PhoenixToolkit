@@ -149,16 +149,17 @@ public static class InstallActivationService
         if (package.Channel == PackageChannel.Develop)
             return Path.Combine(config.DevelopDir, productDirectory);
 
-        if (string.IsNullOrWhiteSpace(package.ReleaseVersion) ||
-            Path.IsPathRooted(package.ReleaseVersion) ||
-            package.ReleaseVersion is "." or ".." ||
-            package.ReleaseVersion.Contains('/') ||
-            package.ReleaseVersion.Contains('\\'))
+        var archiveVersion = package.ArchiveVersion ?? package.ReleaseVersion;
+        if (string.IsNullOrWhiteSpace(archiveVersion) ||
+            Path.IsPathRooted(archiveVersion) ||
+            archiveVersion is "." or ".." ||
+            archiveVersion.Contains('/') ||
+            archiveVersion.Contains('\\'))
         {
             throw new InvalidOperationException($"安装包路径不合法: {package.FileName}");
         }
 
-        return Path.Combine(config.ReleaseDir, package.ReleaseVersion, productDirectory);
+        return Path.Combine(config.ReleaseDir, archiveVersion, productDirectory);
     }
 
     private static string BuildStartMessage(InstallPlan plan)

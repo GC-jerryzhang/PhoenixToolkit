@@ -23,7 +23,8 @@ public static class FetchService
         AppConfig config,
         Func<string, bool> isFileStable,
         Func<string, FileVersionInfo> readVersion,
-        Action<InstallPlan?> notify)
+        Action<InstallPlan?> notify,
+        Func<FileVersionInfo, string?>? resolveReleaseArchiveVersion = null)
     {
         config = ConfigService.NormalizeSourceDirectory(config);
         var logFile = Path.Combine(config.LogDir, $"fetch-phoenix_{DateTime.Now:yyyyMMdd}.log");
@@ -61,8 +62,10 @@ public static class FetchService
                     foreach (var source in sources)
                     {
                         Log($"--- {source.Label} ---");
-                        var designer = FetchPackage(config, source, PackageKind.Designer, Log, isFileStable, readVersion);
-                        var server = FetchPackage(config, source, PackageKind.Server, Log, isFileStable, readVersion);
+                        var designer = FetchPackage(config, source, PackageKind.Designer, Log, isFileStable, readVersion,
+                            resolveReleaseArchiveVersion);
+                        var server = FetchPackage(config, source, PackageKind.Server, Log, isFileStable, readVersion,
+                            resolveReleaseArchiveVersion);
                         try
                         {
                             var plan = InstallPlanService.CreatePlan(config, designer, server);
@@ -144,9 +147,36 @@ public static class FetchService
 
     private static FetchedPackageInfo? FetchPackage(
         AppConfig config, PackageSource source, PackageKind kind, Action<string, string> log,
-        Func<string, bool> isFileStable, Func<string, FileVersionInfo> readVersion)
+        Func<string, bool> isFileStable, Func<string, FileVersionInfo> readVersion,
+        Func<FileVersionInfo, string?>? resolveReleaseArchiveVersion)
     {
         var label = $"[{source.Label}] {kind}";
+        var fallbackLogged = false;
+
+        string? ResolveArchiveVersion(FileVersionInfo info)
+        {
+            if (source.Channel != PackageChannel.Release)
+                return null;
+
+            var packageVersion = resolveReleaseArchiveVersion is null
+                ? ReleasePackageVersionService.GetArchiveVersion(info)
+                : ReleasePackageVersionService.NormalizeArchiveVersion(resolveReleaseArchiveVersion(info));
+            if (packageVersion is not null)
+                return packageVersion;
+
+            var sourceVersion = ReleasePackageVersionService.NormalizeSourceVersion(source.ReleaseVersion);
+            if (sourceVersion is null)
+                throw new InvalidDataException($"Could not determine a valid archive version for {source.Label}.");
+
+            if (!fallbackLogged)
+            {
+                log($"{label}: package version metadata unavailable; using source release version {sourceVersion} for the cache directory.", "WARNING");
+                fallbackLogged = true;
+            }
+
+            return sourceVersion;
+        }
+
         try
         {
             var sourceDirectory = ResolveWindowsPackageSourceDirectory(source.Directory, kind);
@@ -171,9 +201,10 @@ public static class FetchService
             var version = readVersion(latest.FullName);
             log($"{label}: {latest.Name} (FileVersion: {version.FileVersion}, Build: {version.FilePrivatePart})", "INFO");
             var destName = BuildDestinationFileName(kind, latest.Name, version);
-            var destinationDirectory = GetDestinationDirectory(config, source, kind);
+            var archiveVersion = ResolveArchiveVersion(version);
+            var destinationDirectory = GetDestinationDirectory(config, source, kind, archiveVersion);
             var destPath = Path.Combine(destinationDirectory, destName);
-            if (GetCompatibleDestinationPaths(config, source, kind, latest.Name, version, destName)
+            if (GetCompatibleDestinationPaths(config, source, kind, latest.Name, version, destName, archiveVersion)
                 .Any(File.Exists))
             {
                 log($"{label} already exists: {destName} (skipped)", "INFO");
@@ -189,8 +220,10 @@ public static class FetchService
             // Read metadata again after the upload has settled.
             version = readVersion(latest.FullName);
             destName = BuildDestinationFileName(kind, latest.Name, version);
+            archiveVersion = ResolveArchiveVersion(version);
+            destinationDirectory = GetDestinationDirectory(config, source, kind, archiveVersion);
             destPath = Path.Combine(destinationDirectory, destName);
-            if (GetCompatibleDestinationPaths(config, source, kind, latest.Name, version, destName)
+            if (GetCompatibleDestinationPaths(config, source, kind, latest.Name, version, destName, archiveVersion)
                 .Any(File.Exists))
                 return null;
 
@@ -215,7 +248,8 @@ public static class FetchService
                     File.Delete(temporaryPath);
             }
             log($"{label} copied successfully: {destName} (Size: {new FileInfo(destPath).Length} bytes)", "INFO");
-            return new FetchedPackageInfo(kind, destName, destPath, DateTimeOffset.Now, source.Channel, source.ReleaseVersion);
+            return new FetchedPackageInfo(kind, destName, destPath, DateTimeOffset.Now, source.Channel,
+                source.ReleaseVersion, archiveVersion);
         }
         catch (Exception ex)
         {
@@ -251,9 +285,10 @@ public static class FetchService
         PackageKind kind,
         string sourceName,
         FileVersionInfo version,
-        string destinationName)
+        string destinationName,
+        string? archiveVersion)
     {
-        var destinationDirectory = GetDestinationDirectory(config, source, kind);
+        var destinationDirectory = GetDestinationDirectory(config, source, kind, archiveVersion);
         yield return Path.Combine(destinationDirectory, destinationName);
 
         var productVersion = $"{version.FileMajorPart}.{version.FileMinorPart}.{version.FileBuildPart}";
@@ -281,9 +316,11 @@ public static class FetchService
         return $"{timestamp.Groups[1].Value}Phoenix-Server-Windows{buildSuffix}-Setup.exe";
     }
 
-    internal static string GetDestinationDirectory(AppConfig config, PackageSource source, PackageKind kind) =>
+    internal static string GetDestinationDirectory(
+        AppConfig config, PackageSource source, PackageKind kind, string? archiveVersion = null) =>
         source.Channel == PackageChannel.Release
-            ? Path.Combine(config.ReleaseDir, source.ReleaseVersion!, kind == PackageKind.Designer ? "designer" : "server")
+            ? Path.Combine(config.ReleaseDir, archiveVersion ?? source.ReleaseVersion!,
+                kind == PackageKind.Designer ? "designer" : "server")
             : kind == PackageKind.Designer ? config.DesignerDir : config.ServerDir;
 
     private static bool IsFileStable(string path)
