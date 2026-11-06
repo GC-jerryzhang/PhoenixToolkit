@@ -28,6 +28,8 @@ internal static partial class Program
             ReleaseArchiveVersionsUseCanonicalProductVersions,
             ReleasePackagesArchiveByProductVersion,
             ReleaseArchiveVersionFallsBackToSourceVersion,
+            DevelopPackagesArchiveByProductVersion,
+            DevelopLegacyCachesMigrateByProductVersion,
             ChannelSelectionLimitsSources,
             FetchCopiesBothChannelsAndSkipsExistingPackages,
             FetchAcceptsCurrentChineseSourceNamesAndWritesChineseCacheNames,

@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace PhoenixToolkit.Services;
 
-internal static class ReleasePackageVersionService
+internal static class PackageVersionService
 {
     public static string? GetArchiveVersion(FileVersionInfo version) =>
         NormalizeArchiveVersion(version.FileVersion);

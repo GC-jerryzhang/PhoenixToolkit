@@ -24,7 +24,7 @@ public static class FetchService
         Func<string, bool> isFileStable,
         Func<string, FileVersionInfo> readVersion,
         Action<InstallPlan?> notify,
-        Func<FileVersionInfo, string?>? resolveReleaseArchiveVersion = null)
+        Func<FileVersionInfo, string?>? resolveArchiveVersion = null)
     {
         config = ConfigService.NormalizeSourceDirectory(config);
         var logFile = Path.Combine(config.LogDir, $"fetch-phoenix_{DateTime.Now:yyyyMMdd}.log");
@@ -63,9 +63,9 @@ public static class FetchService
                     {
                         Log($"--- {source.Label} ---");
                         var designer = FetchPackage(config, source, PackageKind.Designer, Log, isFileStable, readVersion,
-                            resolveReleaseArchiveVersion);
+                            resolveArchiveVersion);
                         var server = FetchPackage(config, source, PackageKind.Server, Log, isFileStable, readVersion,
-                            resolveReleaseArchiveVersion);
+                            resolveArchiveVersion);
                         try
                         {
                             var plan = InstallPlanService.CreatePlan(config, designer, server);
@@ -148,33 +148,41 @@ public static class FetchService
     private static FetchedPackageInfo? FetchPackage(
         AppConfig config, PackageSource source, PackageKind kind, Action<string, string> log,
         Func<string, bool> isFileStable, Func<string, FileVersionInfo> readVersion,
-        Func<FileVersionInfo, string?>? resolveReleaseArchiveVersion)
+        Func<FileVersionInfo, string?>? resolveArchiveVersion)
     {
         var label = $"[{source.Label}] {kind}";
         var fallbackLogged = false;
 
         string? ResolveArchiveVersion(FileVersionInfo info)
         {
-            if (source.Channel != PackageChannel.Release)
-                return null;
-
-            var packageVersion = resolveReleaseArchiveVersion is null
-                ? ReleasePackageVersionService.GetArchiveVersion(info)
-                : ReleasePackageVersionService.NormalizeArchiveVersion(resolveReleaseArchiveVersion(info));
+            var packageVersion = resolveArchiveVersion is null
+                ? PackageVersionService.GetArchiveVersion(info)
+                : PackageVersionService.NormalizeArchiveVersion(resolveArchiveVersion(info));
             if (packageVersion is not null)
                 return packageVersion;
 
-            var sourceVersion = ReleasePackageVersionService.NormalizeSourceVersion(source.ReleaseVersion);
-            if (sourceVersion is null)
-                throw new InvalidDataException($"Could not determine a valid archive version for {source.Label}.");
+            if (source.Channel == PackageChannel.Release)
+            {
+                var sourceVersion = PackageVersionService.NormalizeSourceVersion(source.ReleaseVersion);
+                if (sourceVersion is null)
+                    throw new InvalidDataException($"Could not determine a valid archive version for {source.Label}.");
+
+                if (!fallbackLogged)
+                {
+                    log($"{label}: package version metadata unavailable; using source release version {sourceVersion} for the cache directory.", "WARNING");
+                    fallbackLogged = true;
+                }
+
+                return sourceVersion;
+            }
 
             if (!fallbackLogged)
             {
-                log($"{label}: package version metadata unavailable; using source release version {sourceVersion} for the cache directory.", "WARNING");
+                log($"{label}: package version metadata unavailable; using the legacy develop cache directory.", "WARNING");
                 fallbackLogged = true;
             }
 
-            return sourceVersion;
+            return null;
         }
 
         try
@@ -297,13 +305,26 @@ public static class FetchService
             : BuildLegacyServerDestinationFileName(sourceName, version);
         yield return Path.Combine(destinationDirectory, legacyName);
 
-        if (source.Channel == PackageChannel.Develop && kind == PackageKind.Designer)
+        if (source.Channel == PackageChannel.Develop)
         {
             var legacyDirectory = PackageCacheMigrationService.GetLegacyDirectory(config, kind);
             yield return Path.Combine(legacyDirectory, destinationName);
             yield return Path.Combine(legacyDirectory, legacyName);
-            yield return Path.Combine(config.DesignerDir,
-                $"{version.FilePrivatePart}Phoenix-Windows-0.0.1-Setup.exe");
+
+            var legacyDevelopDirectory = kind == PackageKind.Designer ? config.DesignerDir : config.ServerDir;
+            yield return Path.Combine(legacyDevelopDirectory, destinationName);
+            yield return Path.Combine(legacyDevelopDirectory, legacyName);
+
+            if (kind == PackageKind.Designer)
+            {
+                yield return Path.Combine(legacyDevelopDirectory,
+                    $"{version.FilePrivatePart}Phoenix-Windows-0.0.1-Setup.exe");
+                if (archiveVersion is not null)
+                {
+                    yield return Path.Combine(destinationDirectory,
+                        $"{version.FilePrivatePart}Phoenix-Windows-0.0.1-Setup.exe");
+                }
+            }
         }
     }
 
@@ -321,7 +342,10 @@ public static class FetchService
         source.Channel == PackageChannel.Release
             ? Path.Combine(config.ReleaseDir, archiveVersion ?? source.ReleaseVersion!,
                 kind == PackageKind.Designer ? "designer" : "server")
-            : kind == PackageKind.Designer ? config.DesignerDir : config.ServerDir;
+            : archiveVersion is not null
+                ? Path.Combine(config.DevelopDir, archiveVersion,
+                    kind == PackageKind.Designer ? "designer" : "server")
+                : kind == PackageKind.Designer ? config.DesignerDir : config.ServerDir;
 
     private static bool IsFileStable(string path)
     {

@@ -146,10 +146,12 @@ public static class InstallActivationService
     {
         var productDirectory = package.Kind == PackageKind.Designer ? "designer" : "server";
 
-        if (package.Channel == PackageChannel.Develop)
+        var archiveVersion = package.Channel == PackageChannel.Develop
+            ? package.ArchiveVersion
+            : package.ArchiveVersion ?? package.ReleaseVersion;
+        if (package.Channel == PackageChannel.Develop && string.IsNullOrWhiteSpace(archiveVersion))
             return Path.Combine(config.DevelopDir, productDirectory);
 
-        var archiveVersion = package.ArchiveVersion ?? package.ReleaseVersion;
         if (string.IsNullOrWhiteSpace(archiveVersion) ||
             Path.IsPathRooted(archiveVersion) ||
             archiveVersion is "." or ".." ||
@@ -159,7 +161,8 @@ public static class InstallActivationService
             throw new InvalidOperationException($"安装包路径不合法: {package.FileName}");
         }
 
-        return Path.Combine(config.ReleaseDir, archiveVersion, productDirectory);
+        var root = package.Channel == PackageChannel.Develop ? config.DevelopDir : config.ReleaseDir;
+        return Path.Combine(root, archiveVersion, productDirectory);
     }
 
     private static string BuildStartMessage(InstallPlan plan)

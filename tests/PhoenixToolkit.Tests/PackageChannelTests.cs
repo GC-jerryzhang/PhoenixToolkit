@@ -29,15 +29,15 @@ internal static partial class Program
 
     private static void ReleaseArchiveVersionsUseCanonicalProductVersions()
     {
-        Assert.True(ReleasePackageVersionService.NormalizeArchiveVersion("1.0.1") == "v1.0.1",
+        Assert.True(PackageVersionService.NormalizeArchiveVersion("1.0.1") == "v1.0.1",
             "Three-part package versions should use the canonical v-prefixed directory name.");
-        Assert.True(ReleasePackageVersionService.NormalizeArchiveVersion("1.0.1.0") == "v1.0.1",
+        Assert.True(PackageVersionService.NormalizeArchiveVersion("1.0.1.0") == "v1.0.1",
             "Four-part file versions should omit the revision component from the archive directory.");
-        Assert.True(ReleasePackageVersionService.NormalizeArchiveVersion("v1.0.2") == "v1.0.2",
+        Assert.True(PackageVersionService.NormalizeArchiveVersion("v1.0.2") == "v1.0.2",
             "Future product versions should be normalized without hard-coded cases.");
-        Assert.Null(ReleasePackageVersionService.NormalizeArchiveVersion("1.0"),
+        Assert.Null(PackageVersionService.NormalizeArchiveVersion("1.0"),
             "Package metadata without a patch component should fall back to the source release version.");
-        Assert.Null(ReleasePackageVersionService.NormalizeArchiveVersion("1.0.1-beta"),
+        Assert.Null(PackageVersionService.NormalizeArchiveVersion("1.0.1-beta"),
             "Non-numeric package versions should be rejected for archive directory names.");
     }
 
@@ -133,8 +133,11 @@ internal static partial class Program
                 Assert.Equal(designer.Channel, server.Channel, "Install plans must stay within one channel.");
                 Assert.Equal("12织启-Windows-1.0.0-Setup.exe", designer.FileName, "Designer should use real version and build.");
                 Assert.Contains(server.FileName, "build12", "Server build should be included when available.");
-                var expectedDir = designer.Channel == PackageChannel.Release
-                    ? Path.Combine(config.ReleaseDir, "v1.0.0", "designer") : config.DesignerDir;
+                var expectedDir = designer.ArchiveVersion is null
+                    ? config.DesignerDir
+                    : designer.Channel == PackageChannel.Release
+                        ? Path.Combine(config.ReleaseDir, designer.ArchiveVersion, "designer")
+                        : Path.Combine(config.DevelopDir, designer.ArchiveVersion, "designer");
                 Assert.Equal(expectedDir, Path.GetDirectoryName(designer.FullPath)!, "Caches must be separate.");
                 Assert.True(File.ReadAllBytes(designer.FullPath).SequenceEqual(File.ReadAllBytes(typeof(Program).Assembly.Location)),
                     "Installer payload must be copied completely.");
@@ -165,7 +168,7 @@ internal static partial class Program
                 "Successful copies should not leave temporary files.");
 
             // Existing develop cache names remain recognized after the naming upgrade.
-            File.Move(plans[0].DesignerPackage!.FullPath, Path.Combine(config.DesignerDir, "12Phoenix-Windows-0.0.1-Setup.exe"));
+            File.Move(plans[0].DesignerPackage!.FullPath, Path.Combine(config.DevelopDir, "v1.0.0", "designer", "12Phoenix-Windows-0.0.1-Setup.exe"));
             FetchService.Execute(config, Stable, FileVersionInfo.GetVersionInfo, Notify);
             Assert.Equal(2, plans.Count, "Legacy Designer cache should prevent a redundant download.");
         });
@@ -251,7 +254,10 @@ internal static partial class Program
             var plans = new List<InstallPlan>();
             var output = FetchService.Execute(config, _ => true, _ => metadata, plan => { if (plan is not null) plans.Add(plan); });
             Assert.Contains(output, "fetch failed", "Copy failure should be logged.");
-            Assert.False(Directory.EnumerateFiles(config.DesignerDir).Any(), "Failed copy must leave no installer or partial file.");
+            Assert.False(Directory.Exists(config.DevelopDir) &&
+                         Directory.EnumerateFiles(config.DevelopDir, "*.exe", SearchOption.AllDirectories)
+                             .Any(path => Path.GetFileName(path).Contains("织启-Windows", StringComparison.OrdinalIgnoreCase)),
+                "Failed copy must leave no Designer installer or partial file.");
             Assert.NotNull(plans.Single().ServerPackage, "Other packages should still succeed.");
         });
     }
@@ -438,9 +444,14 @@ internal static partial class Program
             var oldDevelop = Path.Combine(config.DesignerDir, "12Phoenix-Setup.exe");
             File.WriteAllText(oldDevelop, "old develop");
             File.SetLastWriteTime(oldDevelop, DateTime.Now.AddDays(-100));
+            var oldVersionedDevelop = Path.Combine(config.DevelopDir, "v1.0.0", "designer", "12Phoenix-Versioned-Setup.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(oldVersionedDevelop)!);
+            File.WriteAllText(oldVersionedDevelop, "old versioned develop");
+            File.SetLastWriteTime(oldVersionedDevelop, DateTime.Now.AddDays(-100));
             var output = CleanupService.Execute(config);
             Assert.False(output.Contains("[ERROR]"), output);
             Assert.False(File.Exists(oldDevelop), "Develop should retain its existing age policy.");
+            Assert.False(File.Exists(oldVersionedDevelop), "Versioned develop caches should use the develop age policy.");
             Assert.Equal(4, Directory.GetFiles(config.ReleaseDir, "*.exe", SearchOption.AllDirectories).Length,
                 "Latest package for every release version and product must survive age cleanup.");
             Assert.False(Directory.EnumerateFiles(config.ReleaseDir, "11*", SearchOption.AllDirectories).Any(), "Old superseded releases should expire.");
@@ -543,11 +554,61 @@ internal static partial class Program
             Assert.False(Directory.Exists(Path.Combine(config.LocalBaseDir, "designer")), "An empty legacy folder should be removed.");
             Assert.False(Directory.Exists(Path.Combine(config.LocalBaseDir, "server")), "An empty legacy Server folder should be removed.");
             Assert.True(InstallPlanService.TryStartPlan(config, plan.Id, out var movedPlan, out var error), error);
-            Assert.Equal(Path.Combine(config.DesignerDir, packages[0].FileName), movedPlan!.DesignerPackage!.FullPath,
+            Assert.Equal(Path.Combine(config.DevelopDir, "v1.0.0", "designer", packages[0].FileName), movedPlan!.DesignerPackage!.FullPath,
                 "An existing notification should resolve the migrated Designer package.");
-            Assert.Equal(Path.Combine(config.ServerDir, packages[1].FileName), movedPlan.ServerPackage!.FullPath,
+            Assert.Equal(Path.Combine(config.DevelopDir, "v1.0.0", "server", packages[1].FileName), movedPlan.ServerPackage!.FullPath,
                 "An existing notification should resolve the migrated Server package.");
+            Assert.Equal("v1.0.0", movedPlan.DesignerPackage.ArchiveVersion!,
+                "An old develop notification should receive the migrated archive version.");
             Assert.True(File.Exists(movedPlan.DesignerPackage.FullPath) && File.Exists(movedPlan.ServerPackage.FullPath), "Both migrated packages must exist.");
+        });
+    }
+
+    private static void DevelopPackagesArchiveByProductVersion()
+    {
+        foreach (var productVersion in new[] { "1.0.1", "1.0.2" })
+        {
+            RunIsolated(config =>
+            {
+                config = config with { SourceDir = CreateChannelFixture(config), FetchRelease = false };
+                var plans = new List<InstallPlan>();
+                var output = FetchService.Execute(
+                    config,
+                    _ => true,
+                    FileVersionInfo.GetVersionInfo,
+                    plan => { if (plan is not null) plans.Add(plan); },
+                    _ => productVersion);
+
+                Assert.False(output.Contains("[ERROR]"), output);
+                var plan = plans.Single();
+                var designer = plan.DesignerPackage!;
+                var server = plan.ServerPackage!;
+                var archiveVersion = $"v{productVersion}";
+                Assert.Equal(archiveVersion, designer.ArchiveVersion!, "Develop Designer should store its package version.");
+                Assert.Equal(archiveVersion, server.ArchiveVersion!, "Develop Server should store its package version.");
+                Assert.Equal(Path.Combine(config.DevelopDir, archiveVersion, "designer"), Path.GetDirectoryName(designer.FullPath)!,
+                    "Develop Designer must be cached under its product version.");
+                Assert.Equal(Path.Combine(config.DevelopDir, archiveVersion, "server"), Path.GetDirectoryName(server.FullPath)!,
+                    "Develop Server must be cached under its product version.");
+                InstallActivationService.ValidatePlan(config, plan);
+            });
+        }
+    }
+
+    private static void DevelopLegacyCachesMigrateByProductVersion()
+    {
+        RunIsolated(config =>
+        {
+            var legacyDesigner = Path.Combine(config.DesignerDir, "12Phoenix-Windows-0.0.1-Setup.exe");
+            Directory.CreateDirectory(config.DesignerDir);
+            File.Copy(typeof(Program).Assembly.Location, legacyDesigner);
+            var logs = new List<string>();
+            PackageCacheMigrationService.Migrate(config, (message, _) => logs.Add(message));
+            var migrated = Path.Combine(config.DevelopDir, "v1.0.0", "designer", Path.GetFileName(legacyDesigner));
+            Assert.True(File.Exists(migrated), "Legacy develop packages should move into their product version directory.");
+            Assert.False(File.Exists(legacyDesigner), "The old fixed develop cache path should be emptied after migration.");
+            Assert.True(logs.Any(line => line.Contains("Moved develop package to its product version directory")),
+                "Develop cache migration should be logged.");
         });
     }
 

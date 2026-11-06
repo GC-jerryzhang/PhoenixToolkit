@@ -16,11 +16,11 @@
 - develop 从 `develop\Designer-Windows` 和 `develop\Server-Windows` 拉取最新 Windows 安装包。
 - release 拉取仍从共享 `release` 的版本文件夹中按数字版本选择最新源版本，例如 `v1.10.0` 高于 `v1.9.0`，再读取其中的 `Designer-Windows` / `Server-Windows`。本地归档目录独立按每个安装包的版本资源生成，例如从源 `v1.0.0` 拉到版本 `1.0.1` 的包时保存到 `release\v1.0.1\designer` 或 `server`；后续产品版本会自动进入对应目录。
 - 设计器从安装包版本资源读取真实版本和文件号，例如 `25Phoenix-Windows-1.0.0-Setup.exe`。共享源包兼容新旧命名和缓存名；只调整本地缓存文件名，不改动源安装包内容。服务端兼容 Windows 安装包的时间戳命名。文件号为 0 时使用构建时间戳，非零时也记录到本地文件名。
-- 本地根目录仍为 `D:\TestReceive\historyPackage`。develop 缓存保存在 `develop\designer` / `develop\server`；release 缓存保存在 `release\<安装包版本>\designer` / `server`。Release 通知仍显示共享源版本，每个通知只安装该渠道拉取的包。
+- 本地根目录仍为 `D:\TestReceive\historyPackage`。develop 和 release 都按安装包版本归档，分别保存在 `develop\<安装包版本>\designer` / `server` 与 `release\<安装包版本>\designer` / `server`。通知仍按渠道显示，Release 通知继续显示共享源版本，每个通知只安装该渠道拉取的包。
 
-旧配置会自动将原默认共享地址或以 `develop` 结尾的共享源目录升级到 Installers 根目录，保留本地目录、计划任务间隔和其他设置。首次拉取会将旧 `designer` / `server` 下的安装包移动到 `develop` 子目录，无需重新下载；遇到同名目标或占用文件时保留原文件。已有安装通知也能找到迁移后的包。
+旧配置会自动将原默认共享地址或以 `develop` 结尾的共享源目录升级到 Installers 根目录，保留本地目录、计划任务间隔和其他设置。首次拉取会将旧 `designer` / `server` 下的安装包按版本移动到 `develop\<安装包版本>\designer` / `server`，无需重新下载；遇到同名目标或占用文件时保留原文件。已有安装通知也能找到迁移后的包。
 
-首次拉取会按安装包元数据将旧 Release 缓存归入对应产品版本目录；遇到同名目标时保留原文件，并兼容迁移前已发出的安装通知。两个渠道按目录分别清理，release 每个归档版本、每种安装包始终保留最新的一份，即使超过清理周期。复制使用临时文件，成功后再改名；并发拉取会跳过，避免保存未完成的安装包。
+首次拉取会按安装包元数据将旧 develop / Release 缓存归入对应产品版本目录；遇到同名目标时保留原文件，并兼容迁移前已发出的安装通知。两个渠道按目录分别清理，Release 每个归档版本、每种安装包始终保留最新的一份，即使超过清理周期。复制使用临时文件，成功后再改名；并发拉取会跳过，避免保存未完成的安装包。
 
 ## 本地验证
 

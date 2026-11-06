@@ -13,7 +13,7 @@ internal static class ReleasePackageCacheMigrationService
 
     public static void Migrate(AppConfig config, Action<string, string> log) =>
         Migrate(config,
-            path => ReleasePackageVersionService.GetArchiveVersion(FileVersionInfo.GetVersionInfo(path)),
+            path => PackageVersionService.GetArchiveVersion(FileVersionInfo.GetVersionInfo(path)),
             log);
 
     internal static void Migrate(
@@ -71,7 +71,7 @@ internal static class ReleasePackageCacheMigrationService
                 return package;
 
             var candidate = candidates[0];
-            var archiveVersion = ReleasePackageVersionService.NormalizeSourceVersion(
+            var archiveVersion = PackageVersionService.NormalizeSourceVersion(
                 Path.GetFileName(candidate.VersionDirectory));
             return package with
             {
@@ -94,7 +94,7 @@ internal static class ReleasePackageCacheMigrationService
     {
         try
         {
-            var archiveVersion = ReleasePackageVersionService.NormalizeArchiveVersion(
+            var archiveVersion = PackageVersionService.NormalizeArchiveVersion(
                 resolveArchiveVersion(packagePath));
             if (archiveVersion is null)
             {

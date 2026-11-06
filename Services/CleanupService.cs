@@ -54,6 +54,24 @@ public static class CleanupService
         return string.Join(Environment.NewLine, log);
     }
 
+    private static void CleanupVersionedDevelopPackages(AppConfig config, Action<string, string> log)
+    {
+        if (!Directory.Exists(config.DevelopDir))
+            return;
+
+        foreach (var versionDir in Directory.EnumerateDirectories(config.DevelopDir))
+        {
+            var versionName = Path.GetFileName(versionDir);
+            if (string.Equals(versionName, "designer", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(versionName, "server", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var kind in new[] { "designer", "server" })
+                TieredCleanup(Path.Combine(versionDir, kind),
+                    $"develop/{versionName}/{kind}", config.CleanupWeeks, log);
+        }
+    }
+
     private static void TieredCleanup(
         string folder, string label, CleanupWeeks weeks, Action<string, string> log, bool keepLatest = false)
     {
