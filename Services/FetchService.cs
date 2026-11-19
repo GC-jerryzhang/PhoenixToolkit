@@ -6,11 +6,15 @@ namespace PhoenixToolkit.Services;
 
 public static class FetchService
 {
+    internal const string DesignerPortableFolder = "portable";
     private const int StabilityWaitMs = 5000;
     private static readonly string[] PlatformFolders =
         ["Designer-Linux", "Designer-Windows", "Server-Linux", "Server-Windows"];
     private static readonly Regex DesignerSourceNamePattern = new(
         @"^(?:Phoenix-Windows-|织启(?:-Windows)?-).+\.exe$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex DesignerPortableSourceNamePattern = new(
+        @"^(?:Phoenix-Windows-|织启(?:-Windows)?-)[0-9]{12}-(?<version>[0-9]+(?:\.[0-9]+){2,3})-x64-Portable\.zip\z",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex ServerSourceNamePattern = new(
         @"^(?:Phoenix-Server-Windows-|织启(?:服务管理器|(?:-Server)?(?:-Windows)?)-).+\.exe$",
@@ -76,6 +80,9 @@ public static class FetchService
                             Log($"[{source.Label}] Install plan/notification failed: {ex.Message}", "ERROR");
                         }
                     }
+
+                    foreach (var source in sources)
+                        FetchDesignerPortablePackage(config, source, Log, isFileStable);
                 }
                 Log("=== Fetch cycle completed ===");
             }
@@ -104,9 +111,10 @@ public static class FetchService
             if (Directory.Exists(developDir))
                 sources.Add(new PackageSource(PackageChannel.Develop, developDir));
             else if (HasPlatformSpecificLayout(config.SourceDir) ||
-                     Directory.EnumerateFiles(config.SourceDir, "*.exe")
-                         .Any(path => IsSupportedSourcePackageName(PackageKind.Designer, Path.GetFileName(path)) ||
-                                      IsSupportedSourcePackageName(PackageKind.Server, Path.GetFileName(path))))
+                     Directory.EnumerateFiles(config.SourceDir).Select(path => Path.GetFileName(path))
+                         .Any(name => IsSupportedSourcePackageName(PackageKind.Designer, name) ||
+                                      IsSupportedSourcePackageName(PackageKind.Server, name) ||
+                                      GetDesignerPortableArchiveVersion(name) is not null))
                 sources.Add(new PackageSource(PackageChannel.Develop, config.SourceDir));
             else
                 log($"develop source directory not accessible: {developDir}", "WARNING");
@@ -235,26 +243,8 @@ public static class FetchService
                 .Any(File.Exists))
                 return null;
 
-            Directory.CreateDirectory(destinationDirectory);
-            var temporaryPath = destPath + "." + Guid.NewGuid().ToString("N") + ".partial";
-            try
-            {
-                log($"Copying {label} -> {destPath}", "INFO");
-                // Deny writes during the copy; a partial installer is never exposed as an .exe.
-                using (var input = new FileStream(latest.FullName, FileMode.Open, FileAccess.Read, FileShare.Read))
-                using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                {
-                    input.CopyTo(output);
-                    output.Flush(true);
-                }
-                File.SetLastWriteTimeUtc(temporaryPath, File.GetLastWriteTimeUtc(latest.FullName));
-                File.Move(temporaryPath, destPath);
-            }
-            finally
-            {
-                if (File.Exists(temporaryPath))
-                    File.Delete(temporaryPath);
-            }
+            log($"Copying {label} -> {destPath}", "INFO");
+            CopyPackageFile(latest.FullName, destPath);
             log($"{label} copied successfully: {destName} (Size: {new FileInfo(destPath).Length} bytes)", "INFO");
             return new FetchedPackageInfo(kind, destName, destPath, DateTimeOffset.Now, source.Channel,
                 source.ReleaseVersion, archiveVersion);
@@ -263,6 +253,75 @@ public static class FetchService
         {
             log($"{label} fetch failed: {ex.Message}", "ERROR");
             return null;
+        }
+    }
+
+    private static void FetchDesignerPortablePackage(
+        AppConfig config, PackageSource source, Action<string, string> log, Func<string, bool> isFileStable)
+    {
+        var label = $"[{source.Label}] Designer Portable";
+        try
+        {
+            var sourceDirectory = new DirectoryInfo(ResolveWindowsPackageSourceDirectory(source.Directory, PackageKind.Designer));
+            if (!sourceDirectory.Exists)
+                return;
+
+            var latest = sourceDirectory.EnumerateFiles("*.zip")
+                .Select(file => (File: file, ArchiveVersion: GetDesignerPortableArchiveVersion(file.Name)))
+                .Where(package => package.ArchiveVersion is not null)
+                .OrderByDescending(package => package.File.LastWriteTimeUtc)
+                .ThenByDescending(package => package.File.Name, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (latest.ArchiveVersion is not { } archiveVersion)
+                return;
+
+            var designerDirectory = GetDestinationDirectory(config, source, PackageKind.Designer, archiveVersion);
+            var destPath = Path.Combine(designerDirectory, DesignerPortableFolder, latest.File.Name);
+            if (File.Exists(destPath))
+            {
+                log($"{label} already exists: {destPath} (skipped)", "INFO");
+                return;
+            }
+
+            if (!isFileStable(latest.File.FullName))
+            {
+                log($"{label} file still being written, skipping this cycle.", "WARNING");
+                return;
+            }
+
+            log($"Copying {label} -> {destPath}", "INFO");
+            CopyPackageFile(latest.File.FullName, destPath);
+            log($"{label} copied successfully: {latest.File.Name} (Size: {new FileInfo(destPath).Length} bytes)", "INFO");
+        }
+        catch (Exception ex)
+        {
+            log($"{label} fetch failed: {ex.Message}", "ERROR");
+        }
+    }
+
+    internal static string? GetDesignerPortableArchiveVersion(string fileName) =>
+        PackageVersionService.NormalizeArchiveVersion(DesignerPortableSourceNamePattern.Match(fileName).Groups["version"].Value);
+
+    private static void CopyPackageFile(string sourcePath, string destinationPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        var temporaryPath = destinationPath + "." + Guid.NewGuid().ToString("N") + ".partial";
+        try
+        {
+            // Deny writes to the source and publish the destination only after the copy completes.
+            using (var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                input.CopyTo(output);
+                output.Flush(true);
+            }
+            File.SetLastWriteTimeUtc(temporaryPath, File.GetLastWriteTimeUtc(sourcePath));
+            File.Move(temporaryPath, destinationPath);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
         }
     }
 

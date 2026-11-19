@@ -29,14 +29,16 @@ public static class CleanupService
                 if (Directory.Exists(legacyDirectory))
                     TieredCleanup(legacyDirectory, $"Legacy develop/{kind}", config.CleanupWeeks, Log);
             }
+            CleanupVersionedDevelopPackages(config, Log);
             if (Directory.Exists(config.ReleaseDir))
             {
                 foreach (var versionDir in Directory.EnumerateDirectories(config.ReleaseDir))
                 {
+                    var label = $"release/{Path.GetFileName(versionDir)}";
                     foreach (var kind in new[] { "designer", "server" })
                         TieredCleanup(Path.Combine(versionDir, kind),
-                            $"release/{Path.GetFileName(versionDir)}/{kind}", config.CleanupWeeks, Log,
-                            keepLatest: true);
+                            $"{label}/{kind}", config.CleanupWeeks, Log, keepLatest: true);
+                    CleanupDesignerPortablePackages(versionDir, label, config.CleanupWeeks, Log, keepLatest: true);
                 }
             }
             InstallPlanService.CleanupExpiredPlans(config, Log);
@@ -69,11 +71,22 @@ public static class CleanupService
             foreach (var kind in new[] { "designer", "server" })
                 TieredCleanup(Path.Combine(versionDir, kind),
                     $"develop/{versionName}/{kind}", config.CleanupWeeks, log);
+            CleanupDesignerPortablePackages(versionDir, $"develop/{versionName}", config.CleanupWeeks, log);
         }
     }
 
+    private static void CleanupDesignerPortablePackages(
+        string versionDir, string label, CleanupWeeks weeks, Action<string, string> log, bool keepLatest = false)
+    {
+        var folder = Path.Combine(versionDir, "designer", FetchService.DesignerPortableFolder);
+        if (Directory.Exists(folder))
+            TieredCleanup(folder, $"{label}/designer/{FetchService.DesignerPortableFolder}", weeks, log,
+                keepLatest, isDesignerPortable: true);
+    }
+
     private static void TieredCleanup(
-        string folder, string label, CleanupWeeks weeks, Action<string, string> log, bool keepLatest = false)
+        string folder, string label, CleanupWeeks weeks, Action<string, string> log,
+        bool keepLatest = false, bool isDesignerPortable = false)
     {
         if (!Directory.Exists(folder))
         {
@@ -81,8 +94,8 @@ public static class CleanupService
             return;
         }
 
-        var allFiles = Directory.GetFiles(folder, "*.exe")
-            .Select(f => new FileInfo(f))
+        var allFiles = new DirectoryInfo(folder).EnumerateFiles(isDesignerPortable ? "*.zip" : "*.exe")
+            .Where(file => !isDesignerPortable || FetchService.GetDesignerPortableArchiveVersion(file.Name) is not null)
             .ToList();
 
         if (allFiles.Count == 0)
@@ -102,7 +115,7 @@ public static class CleanupService
         var latest = keepLatest ? allFiles
             .Where(file => !Regex.IsMatch(file.Name, @"Setu\.exe$|Setup \.exe$"))
             .OrderByDescending(file => file.LastWriteTime)
-            .ThenByDescending(file => GetSortKey(file.Name))
+            .ThenByDescending(GetSortKey)
             .FirstOrDefault() : null;
 
         foreach (var file in allFiles)
@@ -156,16 +169,19 @@ public static class CleanupService
         var firstOfDay = allFiles
             .Where(f => f.LastWriteTime.Date == day)
             .Where(f => !Regex.IsMatch(f.Name, @"Setu\.exe$|Setup \.exe$"))
-            .OrderBy(f => GetSortKey(f.Name))
+            .OrderBy(GetSortKey)
             .FirstOrDefault();
 
         return firstOfDay != null &&
                string.Equals(file.Name, firstOfDay.Name, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static long GetSortKey(string name)
+    private static long GetSortKey(FileInfo file)
     {
-        var match = Regex.Match(name, @"^(\d+)");
+        if (string.Equals(file.Extension, ".zip", StringComparison.OrdinalIgnoreCase))
+            return file.LastWriteTimeUtc.Ticks;
+
+        var match = Regex.Match(file.Name, @"^(\d+)");
         return match.Success ? long.Parse(match.Groups[1].Value) : 0;
     }
 

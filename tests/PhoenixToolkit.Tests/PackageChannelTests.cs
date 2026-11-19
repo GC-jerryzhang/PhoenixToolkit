@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using PhoenixToolkit.Models;
@@ -229,6 +230,128 @@ internal static partial class Program
         });
     }
 
+    private static void FetchArchivesLatestDesignerPortablePackageForEachChannel()
+    {
+        RunIsolated(config =>
+        {
+            config = config with { SourceDir = CreateChannelFixture(config) };
+            const string developName = "织启-202611191726-1.0.10-x64-Portable.zip";
+            const string releaseName = "Phoenix-Windows-202611191727-1.0.11.7-x64-portable.ZIP";
+            var developDesigner = Path.Combine(config.SourceDir, "develop", "Designer-Windows");
+            var releaseDesigner = Path.Combine(config.SourceDir, "release", "v1.0.0", "Designer-Windows");
+            var developSource = Path.Combine(developDesigner, developName);
+            var releaseSource = Path.Combine(releaseDesigner, releaseName);
+            CreateDesignerPortableArchive(developSource);
+            CreateDesignerPortableArchive(releaseSource);
+
+            var older = Path.Combine(developDesigner, "织启-202611191728-1.0.9-x64-Portable.zip");
+            CreateDesignerPortableArchive(older);
+            File.SetLastWriteTimeUtc(older, File.GetLastWriteTimeUtc(developSource).AddMinutes(-5));
+            File.WriteAllText(Path.Combine(developDesigner, "织启-202611191729-1.0.10-arm64-Portable.zip"), "other architecture");
+            File.WriteAllText(Path.Combine(developDesigner, "织启-202611191729-1.0.2147483648-x64-Portable.zip"), "invalid version");
+            File.WriteAllText(Path.Combine(config.SourceDir, "develop", "Server-Windows", developName), "wrong product directory");
+
+            var zipChecks = new List<string>();
+            var plans = new List<InstallPlan>();
+            bool CheckStability(string path)
+            {
+                if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    zipChecks.Add(path);
+                return true;
+            }
+            void Notify(InstallPlan? plan)
+            {
+                if (plan is not null)
+                    plans.Add(plan);
+            }
+
+            var output = FetchService.Execute(config, CheckStability, FileVersionInfo.GetVersionInfo, Notify);
+            Assert.False(output.Contains("[ERROR]"), output);
+            Assert.Equal(2, plans.Count, "Both channels should still generate installer plans.");
+            Assert.True(plans.All(plan => plan.DesignerPackage is not null && plan.ServerPackage is not null),
+                "Installer plans should still contain the Designer and Server EXEs.");
+            Assert.True(zipChecks.SequenceEqual(new[] { developSource, releaseSource }),
+                "Only the latest valid Designer Portable ZIP in each channel should be checked.");
+
+            foreach (var (archiveRoot, version, name, source) in new[]
+            {
+                (config.DevelopDir, "v1.0.10", developName, developSource),
+                (config.ReleaseDir, "v1.0.11", releaseName, releaseSource)
+            })
+            {
+                var expected = Path.Combine(archiveRoot, version, "designer", "portable", name);
+                Assert.Equal(expected, Directory.GetFiles(archiveRoot, "*.zip", SearchOption.AllDirectories).Single(),
+                    "The ZIP should keep its name and use the product version from its filename.");
+                Assert.True(File.ReadAllBytes(source).SequenceEqual(File.ReadAllBytes(expected)),
+                    "The portable archive should be copied byte for byte.");
+                Assert.Equal(File.GetLastWriteTimeUtc(source), File.GetLastWriteTimeUtc(expected),
+                    "The copy should preserve the ZIP timestamp used by cleanup.");
+            }
+
+            var repeat = FetchService.Execute(config, CheckStability, FileVersionInfo.GetVersionInfo, Notify);
+            Assert.False(repeat.Contains("[ERROR]"), repeat);
+            Assert.Equal(2, zipChecks.Count, "Existing portable archives should bypass the stability check.");
+            Assert.Equal(2, plans.Count, "A repeated fetch should produce no new installer plan.");
+        });
+    }
+
+    private static void FetchAcceptsFlatSourceWithOnlyDesignerPortablePackage()
+    {
+        RunIsolated(config =>
+        {
+            var source = Path.Combine(config.LocalBaseDir, "source");
+            Directory.CreateDirectory(source);
+            config = config with { SourceDir = source, FetchRelease = false };
+            const string name = "织启-202611191726-1.0.10-x64-Portable.zip";
+            CreateDesignerPortableArchive(Path.Combine(source, name));
+
+            var output = FetchService.Execute(config);
+            Assert.False(output.Contains("[ERROR]"), output);
+            Assert.Contains(output, "Designer Portable copied successfully", "The fetch log should confirm the ZIP copy.");
+            Assert.False(Directory.Exists(config.InstallPlanDir), "A portable-only fetch should not create an install plan.");
+
+            var archive = Path.Combine(config.DevelopDir, "v1.0.10", "designer", "portable", name);
+            var extracted = Path.Combine(config.LocalBaseDir, "extracted");
+            ZipFile.ExtractToDirectory(archive, extracted);
+            Assert.Equal("portable fixture", File.ReadAllText(Path.Combine(extracted, "designer.txt")),
+                "The normal fetch entry point should produce an extractable ZIP.");
+        });
+    }
+
+    private static void FetchRetriesUnstableOrLockedDesignerPortablePackage()
+    {
+        RunIsolated(config =>
+        {
+            var source = Path.Combine(config.LocalBaseDir, "source");
+            var designer = Path.Combine(source, "develop", "Designer-Windows");
+            Directory.CreateDirectory(designer);
+            config = config with { SourceDir = source, FetchRelease = false };
+            const string name = "织启-202611191726-1.0.10-x64-Portable.zip";
+            var sourcePath = Path.Combine(designer, name);
+            CreateDesignerPortableArchive(sourcePath);
+
+            string Fetch(bool stable) => FetchService.Execute(config, _ => stable, FileVersionInfo.GetVersionInfo, _ => { });
+            Assert.Contains(Fetch(false), "Designer Portable file still being written", "Incomplete uploads should be skipped.");
+            Assert.False(Directory.Exists(config.DevelopDir), "An unstable ZIP should leave no cache directory.");
+
+            using (File.Open(sourcePath, FileMode.Open, FileAccess.Read, FileShare.None))
+                Assert.Contains(Fetch(true), "Designer Portable fetch failed", "A locked source should record a copy error.");
+
+            var folder = Path.Combine(config.DevelopDir, "v1.0.10", "designer", "portable");
+            Assert.False(Directory.Exists(folder) && Directory.EnumerateFiles(folder).Any(),
+                "A failed copy should leave no ZIP or temporary file.");
+            Assert.Contains(Fetch(true), "Designer Portable copied successfully", "The next cycle should retry the ZIP.");
+            Assert.Equal(Path.Combine(folder, name), Directory.GetFiles(folder).Single(), "Only the complete ZIP should be visible.");
+        });
+    }
+
+    private static void CreateDesignerPortableArchive(string path)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        using var writer = new StreamWriter(archive.CreateEntry("designer.txt").Open());
+        writer.Write("portable fixture");
+    }
+
     private static void FetchRejectsConcurrentCycleAndWritesLog()
     {
         RunIsolated(config =>
@@ -456,6 +579,46 @@ internal static partial class Program
                 "Latest package for every release version and product must survive age cleanup.");
             Assert.False(Directory.EnumerateFiles(config.ReleaseDir, "11*", SearchOption.AllDirectories).Any(), "Old superseded releases should expire.");
         });
+    }
+
+    private static void CleanupAppliesChannelRetentionToDesignerPortablePackages()
+    {
+        RunIsolated(config =>
+        {
+            const string older = "织启-202611191725-1.0.10-x64-Portable.zip";
+            const string latest = "织启-202611191726-1.0.10-x64-Portable.zip";
+            const string partial = latest + ".abc.partial";
+            var channels = new[] { (config.DevelopDir, false), (config.ReleaseDir, true) };
+            foreach (var (cache, _) in channels)
+            {
+                var folder = Path.Combine(cache, "v1.0.10", "designer", "portable");
+                Directory.CreateDirectory(folder);
+                WriteAgedFile(Path.Combine(folder, older), 100);
+                WriteAgedFile(Path.Combine(folder, latest), 90);
+                WriteAgedFile(Path.Combine(folder, partial), 90);
+                WriteAgedFile(Path.Combine(folder, "unrelated.zip"), 90);
+                WriteAgedFile(Path.Combine(Path.GetDirectoryName(folder)!, "12Phoenix-Setup.exe"), 80);
+            }
+
+            var output = CleanupService.Execute(config);
+            Assert.False(output.Contains("[ERROR]"), output);
+            foreach (var (cache, keepLatest) in channels)
+            {
+                var folder = Path.Combine(cache, "v1.0.10", "designer", "portable");
+                Assert.False(File.Exists(Path.Combine(folder, older)),
+                    "Superseded ZIPs should expire in both channels.");
+                Assert.Equal(keepLatest, File.Exists(Path.Combine(folder, latest)),
+                    "Release should keep its latest ZIP independently of the Designer EXE.");
+                Assert.True(File.Exists(Path.Combine(folder, "unrelated.zip")), "Unrelated archives should be preserved.");
+                Assert.True(File.Exists(Path.Combine(folder, partial)), "Cleanup should leave temporary copies to the fetch cycle.");
+            }
+        });
+
+        static void WriteAgedFile(string path, int ageDays)
+        {
+            File.WriteAllText(path, "cleanup fixture");
+            File.SetLastWriteTime(path, DateTime.Now.AddDays(-ageDays));
+        }
     }
 
     private static void ReleaseCacheMigrationPreservesConflictsAndResolvesLegacyPlans()
