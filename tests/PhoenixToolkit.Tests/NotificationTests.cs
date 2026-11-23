@@ -44,6 +44,38 @@ internal static partial class Program
         }
     }
 
+    private static void DesignerPortableNotificationShowsVersionAndFolderWithoutInstalling()
+    {
+        foreach (var (channel, releaseVersion, title, iconName) in new[]
+        {
+            (PackageChannel.Develop, (string?)null, "DEVELOP · 开发版", "D 开发版"),
+            (PackageChannel.Release, "v1.0.0", "RELEASE · 发布版 · v1.0.0", "R 发布版")
+        })
+        {
+            var folder = Path.Combine(@"D:\history & packages", channel.ToString(), "v1.0.10", "designer", "portable");
+            var package = new FetchedDesignerPortablePackage(channel, releaseVersion, "v1.0.10",
+                Path.Combine(folder, "织启-202611191726-1.0.10-x64-Portable.zip"));
+            var icon = new Uri($"file:///D:/icons/{channel}.png");
+            var builder = NotificationService.BuildDesignerPortableFetchNotification(package, resolvedChannel =>
+            {
+                Assert.Equal(channel, resolvedChannel, "The portable toast should use its channel icon.");
+                return icon;
+            });
+            var xml = XDocument.Parse(builder.GetToastContent().GetContent());
+            var text = xml.Descendants("text").Select(element => element.Value).ToArray();
+            Assert.Equal(3, text.Length, "The portable toast needs a title, package details and local folder.");
+            Assert.Equal("设计器绿色版已下载", text[0], "The title should identify the portable download.");
+            Assert.Equal($"{title} · 包版本 v1.0.10", text[1], "The channel, source release and product version must be clear.");
+            Assert.Equal(folder, text[2], "The toast must show the local folder with its original characters.");
+            Assert.Equal(icon.AbsoluteUri, xml.Descendants("image").Single().Attribute("src")!.Value,
+                "The portable toast should reuse the channel icon.");
+            Assert.Equal(iconName, xml.Descendants("image").Single().Attribute("alt")!.Value,
+                "The icon should keep its channel label.");
+            Assert.False(xml.Root!.Attribute("activationType")?.Value == "protocol", "Clicking the toast must not start an installer.");
+            Assert.False(xml.Descendants("action").Any(), "A portable download must not expose an install button.");
+        }
+    }
+
     private static void FetchNotificationsOnlyShowPackagesPresentInThePlan()
     {
         foreach (var channel in new[] { PackageChannel.Develop, PackageChannel.Release })

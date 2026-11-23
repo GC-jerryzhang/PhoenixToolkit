@@ -19,11 +19,23 @@ public static class NotificationService
         if (installPlan is null)
             return;
 
-        BuildFetchNotification(installPlan)
-            .Show(toast =>
-            {
-                toast.ExpirationTime = DateTimeOffset.Now.AddMinutes(5);
-            });
+        Show(BuildFetchNotification(installPlan));
+    }
+
+    internal static void ShowDesignerPortableFetchResult(FetchedDesignerPortablePackage package) =>
+        Show(BuildDesignerPortableFetchNotification(package));
+
+    internal static ToastContentBuilder BuildDesignerPortableFetchNotification(
+        FetchedDesignerPortablePackage package, Func<PackageChannel, Uri?>? resolveIcon = null)
+    {
+        var builder = new ToastContentBuilder()
+            .AddText("设计器绿色版已下载", hintMaxLines: 1)
+            .AddText($"{BuildChannelTitle(package.Channel, package.ReleaseVersion)} · 包版本 {package.ArchiveVersion}",
+                hintMaxLines: 1)
+            .AddText(Path.GetDirectoryName(package.FullPath)!, hintMaxLines: 2);
+
+        AddChannelIcon(builder, package.Channel, resolveIcon);
+        return builder;
     }
 
     internal static ToastContentBuilder BuildFetchNotification(
@@ -45,22 +57,32 @@ public static class NotificationService
             .SetContent($"安装 {channel}")
             .SetProtocolActivation(installUri));
 
-        var icon = resolveIcon is null ? TryGetChannelIcon(package.Channel) : resolveIcon(package.Channel);
-        if (icon is not null)
-            builder.AddAppLogoOverride(icon, alternateText: channel == "RELEASE" ? "R 发布版" : "D 开发版");
-
+        AddChannelIcon(builder, package.Channel, resolveIcon);
         return builder;
     }
 
     internal static string BuildFetchTitle(InstallPlan plan)
     {
         var package = GetFirstPackage(plan);
-        if (package.Channel != PackageChannel.Release)
+        return BuildChannelTitle(package.Channel, package.ReleaseVersion);
+    }
+
+    private static string BuildChannelTitle(PackageChannel channel, string? releaseVersion)
+    {
+        if (channel != PackageChannel.Release)
             return "DEVELOP · 开发版";
 
-        return string.IsNullOrWhiteSpace(package.ReleaseVersion)
+        return string.IsNullOrWhiteSpace(releaseVersion)
             ? "RELEASE · 发布版"
-            : $"RELEASE · 发布版 · {package.ReleaseVersion}";
+            : $"RELEASE · 发布版 · {releaseVersion}";
+    }
+
+    private static void AddChannelIcon(
+        ToastContentBuilder builder, PackageChannel channel, Func<PackageChannel, Uri?>? resolveIcon)
+    {
+        var icon = resolveIcon is null ? TryGetChannelIcon(channel) : resolveIcon(channel);
+        if (icon is not null)
+            builder.AddAppLogoOverride(icon, alternateText: channel == PackageChannel.Release ? "R 发布版" : "D 开发版");
     }
 
     internal static string BuildPackageSummary(FetchedPackageInfo package)
@@ -135,14 +157,11 @@ public static class NotificationService
         plan.DesignerPackage ?? plan.ServerPackage
         ?? throw new ArgumentException("Install plan must contain at least one package.", nameof(plan));
 
-    public static void ShowInstallFailure(string message)
-    {
-        new ToastContentBuilder()
+    public static void ShowInstallFailure(string message) =>
+        Show(new ToastContentBuilder()
             .AddText("Phoenix 安装启动失败")
-            .AddText(message)
-            .Show(toast =>
-            {
-                toast.ExpirationTime = DateTimeOffset.Now.AddMinutes(5);
-            });
-    }
+            .AddText(message));
+
+    private static void Show(ToastContentBuilder builder) =>
+        builder.Show(toast => toast.ExpirationTime = DateTimeOffset.Now.AddMinutes(5));
 }

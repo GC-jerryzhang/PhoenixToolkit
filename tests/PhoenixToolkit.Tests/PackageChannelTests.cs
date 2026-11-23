@@ -253,6 +253,7 @@ internal static partial class Program
 
             var zipChecks = new List<string>();
             var plans = new List<InstallPlan>();
+            var portableNotifications = new List<FetchedDesignerPortablePackage>();
             bool CheckStability(string path)
             {
                 if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
@@ -265,7 +266,8 @@ internal static partial class Program
                     plans.Add(plan);
             }
 
-            var output = FetchService.Execute(config, CheckStability, FileVersionInfo.GetVersionInfo, Notify);
+            var output = FetchService.Execute(config, CheckStability, FileVersionInfo.GetVersionInfo, Notify,
+                notifyPortable: portableNotifications.Add);
             Assert.False(output.Contains("[ERROR]"), output);
             Assert.Equal(2, plans.Count, "Both channels should still generate installer plans.");
             Assert.True(plans.All(plan => plan.DesignerPackage is not null && plan.ServerPackage is not null),
@@ -288,10 +290,20 @@ internal static partial class Program
                     "The copy should preserve the ZIP timestamp used by cleanup.");
             }
 
-            var repeat = FetchService.Execute(config, CheckStability, FileVersionInfo.GetVersionInfo, Notify);
+            Assert.True(portableNotifications.SequenceEqual(new FetchedDesignerPortablePackage[]
+            {
+                new(PackageChannel.Develop, null, "v1.0.10",
+                    Path.Combine(config.DevelopDir, "v1.0.10", "designer", "portable", developName)),
+                new(PackageChannel.Release, "v1.0.0", "v1.0.11",
+                    Path.Combine(config.ReleaseDir, "v1.0.11", "designer", "portable", releaseName))
+            }), "Each channel should report the downloaded ZIP's source channel, product version and saved path.");
+
+            var repeat = FetchService.Execute(config, CheckStability, FileVersionInfo.GetVersionInfo, Notify,
+                notifyPortable: portableNotifications.Add);
             Assert.False(repeat.Contains("[ERROR]"), repeat);
             Assert.Equal(2, zipChecks.Count, "Existing portable archives should bypass the stability check.");
             Assert.Equal(2, plans.Count, "A repeated fetch should produce no new installer plan.");
+            Assert.Equal(2, portableNotifications.Count, "Cached ZIPs must not be notified again.");
         });
     }
 
@@ -305,12 +317,15 @@ internal static partial class Program
             const string name = "织启-202611191726-1.0.10-x64-Portable.zip";
             CreateDesignerPortableArchive(Path.Combine(source, name));
 
-            var output = FetchService.Execute(config);
+            var portableNotifications = new List<FetchedDesignerPortablePackage>();
+            var output = FetchService.Execute(config, _ => true, FileVersionInfo.GetVersionInfo, _ => { },
+                notifyPortable: portableNotifications.Add);
             Assert.False(output.Contains("[ERROR]"), output);
             Assert.Contains(output, "Designer Portable copied successfully", "The fetch log should confirm the ZIP copy.");
             Assert.False(Directory.Exists(config.InstallPlanDir), "A portable-only fetch should not create an install plan.");
 
             var archive = Path.Combine(config.DevelopDir, "v1.0.10", "designer", "portable", name);
+            Assert.Equal(archive, portableNotifications.Single().FullPath, "A ZIP-only fetch must notify independently.");
             var extracted = Path.Combine(config.LocalBaseDir, "extracted");
             ZipFile.ExtractToDirectory(archive, extracted);
             Assert.Equal("portable fixture", File.ReadAllText(Path.Combine(extracted, "designer.txt")),
@@ -330,7 +345,9 @@ internal static partial class Program
             var sourcePath = Path.Combine(designer, name);
             CreateDesignerPortableArchive(sourcePath);
 
-            string Fetch(bool stable) => FetchService.Execute(config, _ => stable, FileVersionInfo.GetVersionInfo, _ => { });
+            var notifications = new List<FetchedDesignerPortablePackage>();
+            string Fetch(bool stable) => FetchService.Execute(config, _ => stable, FileVersionInfo.GetVersionInfo, _ => { },
+                notifyPortable: notifications.Add);
             Assert.Contains(Fetch(false), "Designer Portable file still being written", "Incomplete uploads should be skipped.");
             Assert.False(Directory.Exists(config.DevelopDir), "An unstable ZIP should leave no cache directory.");
 
@@ -340,8 +357,10 @@ internal static partial class Program
             var folder = Path.Combine(config.DevelopDir, "v1.0.10", "designer", "portable");
             Assert.False(Directory.Exists(folder) && Directory.EnumerateFiles(folder).Any(),
                 "A failed copy should leave no ZIP or temporary file.");
+            Assert.Equal(0, notifications.Count, "Unstable uploads and failed copies must not notify.");
             Assert.Contains(Fetch(true), "Designer Portable copied successfully", "The next cycle should retry the ZIP.");
             Assert.Equal(Path.Combine(folder, name), Directory.GetFiles(folder).Single(), "Only the complete ZIP should be visible.");
+            Assert.Equal(Path.Combine(folder, name), notifications.Single().FullPath, "The successful retry should notify.");
         });
     }
 

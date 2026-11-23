@@ -21,14 +21,16 @@ public static class FetchService
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static string Execute(AppConfig config) => Execute(
-        config, IsFileStable, FileVersionInfo.GetVersionInfo, NotificationService.ShowFetchResult);
+        config, IsFileStable, FileVersionInfo.GetVersionInfo, NotificationService.ShowFetchResult,
+        notifyPortable: NotificationService.ShowDesignerPortableFetchResult);
 
     internal static string Execute(
         AppConfig config,
         Func<string, bool> isFileStable,
         Func<string, FileVersionInfo> readVersion,
         Action<InstallPlan?> notify,
-        Func<FileVersionInfo, string?>? resolveArchiveVersion = null)
+        Func<FileVersionInfo, string?>? resolveArchiveVersion = null,
+        Action<FetchedDesignerPortablePackage>? notifyPortable = null)
     {
         config = ConfigService.NormalizeSourceDirectory(config);
         var logFile = Path.Combine(config.LogDir, $"fetch-phoenix_{DateTime.Now:yyyyMMdd}.log");
@@ -82,7 +84,20 @@ public static class FetchService
                     }
 
                     foreach (var source in sources)
-                        FetchDesignerPortablePackage(config, source, Log, isFileStable);
+                    {
+                        var portable = FetchDesignerPortablePackage(config, source, Log, isFileStable);
+                        if (portable is null)
+                            continue;
+
+                        try
+                        {
+                            notifyPortable?.Invoke(portable);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[{source.Label}] Designer Portable notification failed: {ex.Message}", "ERROR");
+                        }
+                    }
                 }
                 Log("=== Fetch cycle completed ===");
             }
@@ -256,7 +271,7 @@ public static class FetchService
         }
     }
 
-    private static void FetchDesignerPortablePackage(
+    private static FetchedDesignerPortablePackage? FetchDesignerPortablePackage(
         AppConfig config, PackageSource source, Action<string, string> log, Func<string, bool> isFileStable)
     {
         var label = $"[{source.Label}] Designer Portable";
@@ -264,7 +279,7 @@ public static class FetchService
         {
             var sourceDirectory = new DirectoryInfo(ResolveWindowsPackageSourceDirectory(source.Directory, PackageKind.Designer));
             if (!sourceDirectory.Exists)
-                return;
+                return null;
 
             var latest = sourceDirectory.EnumerateFiles("*.zip")
                 .Select(file => (File: file, ArchiveVersion: GetDesignerPortableArchiveVersion(file.Name)))
@@ -273,29 +288,31 @@ public static class FetchService
                 .ThenByDescending(package => package.File.Name, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault();
             if (latest.ArchiveVersion is not { } archiveVersion)
-                return;
+                return null;
 
             var designerDirectory = GetDestinationDirectory(config, source, PackageKind.Designer, archiveVersion);
             var destPath = Path.Combine(designerDirectory, DesignerPortableFolder, latest.File.Name);
             if (File.Exists(destPath))
             {
                 log($"{label} already exists: {destPath} (skipped)", "INFO");
-                return;
+                return null;
             }
 
             if (!isFileStable(latest.File.FullName))
             {
                 log($"{label} file still being written, skipping this cycle.", "WARNING");
-                return;
+                return null;
             }
 
             log($"Copying {label} -> {destPath}", "INFO");
             CopyPackageFile(latest.File.FullName, destPath);
             log($"{label} copied successfully: {latest.File.Name} (Size: {new FileInfo(destPath).Length} bytes)", "INFO");
+            return new FetchedDesignerPortablePackage(source.Channel, source.ReleaseVersion, archiveVersion, destPath);
         }
         catch (Exception ex)
         {
             log($"{label} fetch failed: {ex.Message}", "ERROR");
+            return null;
         }
     }
 

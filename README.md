@@ -17,7 +17,7 @@
 - release 拉取仍从共享 `release` 的版本文件夹中按数字版本选择最新源版本，例如 `v1.10.0` 高于 `v1.9.0`，再读取其中的 `Designer-Windows` / `Server-Windows`。本地归档目录独立按每个安装包的版本资源生成，例如从源 `v1.0.0` 拉到版本 `1.0.1` 的包时保存到 `release\v1.0.1\designer` 或 `server`；后续产品版本会自动进入对应目录。
 - 设计器从安装包版本资源读取真实版本和文件号，例如 `25Phoenix-Windows-1.0.0-Setup.exe`。共享源包兼容新旧命名和缓存名；只调整本地缓存文件名，不改动源安装包内容。服务端兼容 Windows 安装包的时间戳命名。文件号为 0 时使用构建时间戳，非零时也记录到本地文件名。
 - 本地根目录仍为 `D:\TestReceive\historyPackage`。develop 和 release 都按安装包版本归档，分别保存在 `develop\<安装包版本>\designer` / `server` 与 `release\<安装包版本>\designer` / `server`。通知仍按渠道显示，Release 通知继续显示共享源版本，每个通知只安装该渠道拉取的包。
-- 两个渠道也会从 `Designer-Windows` 拉取各自最新的设计器绿色版，例如 `织启-202611191726-1.0.10-x64-Portable.zip`。ZIP 保留原文件名并按文件名中的产品版本归档到 `develop\v1.0.10\designer\portable` 或 `release\v1.0.10\designer\portable`，下载后手动解压即可使用。绿色版按渠道和版本独立清理，release 每个归档版本保留最新一份。
+- 两个渠道也会从 `Designer-Windows` 拉取各自最新的设计器绿色版，例如 `织启-202611191726-1.0.10-x64-Portable.zip`。ZIP 保留原文件名并按文件名中的产品版本归档到 `develop\v1.0.10\designer\portable` 或 `release\v1.0.10\designer\portable`。新 ZIP 保存成功后，Windows 通知会显示渠道、包版本和保存目录。下载后手动解压即可使用。绿色版按渠道和版本独立清理，release 每个归档版本保留最新一份。
 
 旧配置会自动将原默认共享地址或以 `develop` 结尾的共享源目录升级到 Installers 根目录，保留本地目录、计划任务间隔和其他设置。首次拉取会将旧 `designer` / `server` 下的安装包按版本移动到 `develop\<安装包版本>\designer` / `server`，无需重新下载；遇到同名目标或占用文件时保留原文件。已有安装通知也能找到迁移后的包。
 

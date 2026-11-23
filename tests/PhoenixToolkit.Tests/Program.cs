@@ -53,6 +53,7 @@ internal static partial class Program
             UnstableReleasePackageDoesNotBlockOtherPackages,
             FetchNotificationsIdentifyChannelsAndUseCompactPackageSummaries,
             FetchNotificationBodyAndButtonTargetTheSameChannelPlan,
+            DesignerPortableNotificationShowsVersionAndFolderWithoutInstalling,
             FetchNotificationsOnlyShowPackagesPresentInThePlan,
             PackageSummariesSupportLegacyNamesAndOmitUnavailableMetadata,
             FetchNotificationsKeepChannelVisibleWithLongOrMissingReleaseVersions,
