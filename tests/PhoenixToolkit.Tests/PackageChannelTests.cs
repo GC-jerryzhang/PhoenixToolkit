@@ -207,26 +207,38 @@ internal static partial class Program
             Directory.CreateDirectory(serverSource);
             File.Copy(typeof(Program).Assembly.Location,
                 Path.Combine(designerSource, "织启-202610151732.exe"));
-            File.Copy(typeof(Program).Assembly.Location,
-                Path.Combine(serverSource, "织启服务管理器-202610151733.exe"));
+            var serverInstaller = Path.Combine(serverSource, "织启服务管理器-202611271203-1.0.10.exe");
+            File.Copy(typeof(Program).Assembly.Location, serverInstaller);
 
+            config = config with { SourceDir = source, FetchRelease = false };
             var plans = new List<InstallPlan>();
-            var output = FetchService.Execute(
-                config with { SourceDir = source, FetchRelease = false },
-                _ => true,
-                FileVersionInfo.GetVersionInfo,
-                plan => { if (plan is not null) plans.Add(plan); });
+            void Notify(InstallPlan? plan)
+            {
+                if (plan is not null)
+                    plans.Add(plan);
+            }
+            var output = FetchService.Execute(config, _ => true, FileVersionInfo.GetVersionInfo, Notify);
 
             Assert.False(output.Contains("[ERROR]"), output);
             var plan = plans.Single();
             Assert.Equal("12织启-Windows-1.0.0-Setup.exe", plan.DesignerPackage!.FileName,
                 "Current Designer source names should produce Chinese cache names.");
-            Assert.Equal("202610151733织启-Server-Windows-build12-Setup.exe", plan.ServerPackage!.FileName,
-                "Current Chinese Server source names should produce Chinese cache names.");
+            var serverPackage = plan.ServerPackage!;
+            Assert.Equal("202611271203织启-Server-Windows-build12-Setup.exe", serverPackage.FileName,
+                "A versioned Server source name should keep its timestamp and EXE build number in the cache name.");
+            var serverCache = Path.Combine(config.DevelopDir, "v1.0.0", "server");
+            Assert.Equal(Path.Combine(serverCache, serverPackage.FileName), serverPackage.FullPath,
+                "The Server archive directory must use the EXE version resource.");
+            Assert.True(File.Exists(serverPackage.FullPath), "The Windows Server installer should be copied into the versioned cache.");
             Assert.True(File.Exists(Path.Combine(designerSource, "织启-202610151732.exe")),
                 "Fetching must leave the shared Designer source name untouched.");
-            Assert.True(File.Exists(Path.Combine(serverSource, "织启服务管理器-202610151733.exe")),
-                "Fetching must leave the shared Server source name untouched.");
+            Assert.True(File.Exists(serverInstaller), "Fetching must leave the shared Server source name untouched.");
+
+            var legacyCache = Path.Combine(serverCache, "202611271203Phoenix-Server-Windows-build12-Setup.exe");
+            File.Move(serverPackage.FullPath, legacyCache);
+            var repeat = FetchService.Execute(config, _ => true, FileVersionInfo.GetVersionInfo, Notify);
+            Assert.Contains(repeat, "Server already exists", "A versioned source name must still match a legacy cache name.");
+            Assert.Equal(1, plans.Count, "An already cached Server installer must not create another install plan.");
         });
     }
 

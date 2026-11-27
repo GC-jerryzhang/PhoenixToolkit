@@ -19,6 +19,9 @@ public static class FetchService
     private static readonly Regex ServerSourceNamePattern = new(
         @"^(?:Phoenix-Server-Windows-|织启(?:服务管理器|(?:-Server)?(?:-Windows)?)-).+\.exe$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex ServerSourceTimestampPattern = new(
+        @"(?<!\d)(?<timestamp>\d{12})(?:-[0-9]+(?:\.[0-9]+){2,3})?\.exe\z",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static string Execute(AppConfig config) => Execute(
         config, IsFileStable, FileVersionInfo.GetVersionInfo, NotificationService.ShowFetchResult,
@@ -352,11 +355,11 @@ public static class FetchService
             return $"{version.FilePrivatePart}织启-Windows-{productVersion}-Setup.exe";
         }
 
-        var timestamp = Regex.Match(sourceName, @"(?<!\d)(\d{12})(?=\.exe$)", RegexOptions.IgnoreCase);
+        var timestamp = ServerSourceTimestampPattern.Match(sourceName);
         if (!timestamp.Success)
             throw new InvalidDataException($"Could not parse timestamp from Server filename: {sourceName}.");
         var buildSuffix = version.FilePrivatePart > 0 ? $"-build{version.FilePrivatePart}" : string.Empty;
-        return $"{timestamp.Groups[1].Value}织启-Server-Windows{buildSuffix}-Setup.exe";
+        return $"{timestamp.Groups["timestamp"].Value}织启-Server-Windows{buildSuffix}-Setup.exe";
     }
 
     private static bool IsSupportedSourcePackageName(PackageKind kind, string fileName) =>
@@ -406,11 +409,11 @@ public static class FetchService
 
     private static string BuildLegacyServerDestinationFileName(string sourceName, FileVersionInfo version)
     {
-        var timestamp = Regex.Match(sourceName, @"(?<!\d)(\d{12})(?=\.exe$)");
+        var timestamp = ServerSourceTimestampPattern.Match(sourceName);
         if (!timestamp.Success)
             return sourceName;
         var buildSuffix = version.FilePrivatePart > 0 ? $"-build{version.FilePrivatePart}" : string.Empty;
-        return $"{timestamp.Groups[1].Value}Phoenix-Server-Windows{buildSuffix}-Setup.exe";
+        return $"{timestamp.Groups["timestamp"].Value}Phoenix-Server-Windows{buildSuffix}-Setup.exe";
     }
 
     internal static string GetDestinationDirectory(
